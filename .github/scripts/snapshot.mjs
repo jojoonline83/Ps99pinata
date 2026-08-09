@@ -8,16 +8,16 @@ const TOP_PAGES          = 10;
 const PAGE_SIZE          = 50;
 const DETAIL_CONCURRENCY = 50;
 
-async function fetchJson(url, attempts = 3) {
+async function fetchJson(url, attempts = 2) {
     for (let i = 0; i < attempts; i++) {
         try {
-            const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+            const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
             if (res.ok) {
                 const json = await res.json();
                 if (json.status === 'ok') return json;
             }
         } catch (_) {}
-        if (i < attempts - 1) await new Promise(r => setTimeout(r, 300 * (i + 1)));
+        if (i < attempts - 1) await new Promise(r => setTimeout(r, 300));
     }
     return null;
 }
@@ -176,24 +176,36 @@ if (!summaries.length) {
     process.exit(0);
 }
 
-console.log(`Fetched ${summaries.length} clan summaries. Fetching detail…`);
+const withPoints = summaries.filter(s => s.Points > 0);
+console.log(`Fetched ${summaries.length} clan summaries (${withPoints.length} with points). Fetching detail…`);
 
-const clans = await mapWithConcurrency(summaries, DETAIL_CONCURRENCY, async summary => {
-    if (summary.Points <= 0) {
-        return { Name: summary.Name, Points: 0, Members: summary.Members, roster: [] };
+const DETAIL_DEADLINE = Date.now() + 120_000;
+let detailDone = 0;
+let detailFailed = 0;
+
+const detailedClans = await mapWithConcurrency(withPoints, DETAIL_CONCURRENCY, async summary => {
+    if (Date.now() > DETAIL_DEADLINE) {
+        detailFailed++;
+        return { Name: summary.Name, Points: summary.Points, Members: summary.Members, roster: [] };
     }
     const detailJson = await fetchJson(`${API_BASE}/clan/${encodeURIComponent(summary.Name)}`);
     const detail = detailJson?.data;
+    detailDone++;
+    if (detailDone % 50 === 0) console.log(`  detail progress: ${detailDone}/${withPoints.length}`);
 
     if (!detail) {
-        return {
-            Name: summary.Name, Points: summary.Points,
-            Members: summary.Members, roster: [],
-        };
+        detailFailed++;
+        return { Name: summary.Name, Points: summary.Points, Members: summary.Members, roster: [] };
     }
 
     return buildClanFromDetail(detail, summary);
 });
+if (detailFailed) console.log(`  ${detailFailed} clan detail(s) skipped or failed.`);
+
+const zeroClans = summaries.filter(s => s.Points <= 0).map(s => ({
+    Name: s.Name, Points: 0, Members: s.Members, roster: [],
+}));
+const clans = [...detailedClans, ...zeroClans];
 
 let resolvedCache = {};
 if (existsSync(RESOLVED_CACHE_FILE)) {
