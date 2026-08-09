@@ -6,18 +6,18 @@ const RESOLVED_CACHE_FILE = 'resolved_names.json';
 const RETENTION_MS       = 95 * 60 * 1000;
 const TOP_PAGES          = 10;
 const PAGE_SIZE          = 50;
-const DETAIL_CONCURRENCY = 25;
+const DETAIL_CONCURRENCY = 50;
 
 async function fetchJson(url, attempts = 3) {
     for (let i = 0; i < attempts; i++) {
         try {
-            const res = await fetch(url, { signal: AbortSignal.timeout(20000) });
+            const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
             if (res.ok) {
                 const json = await res.json();
                 if (json.status === 'ok') return json;
             }
         } catch (_) {}
-        if (i < attempts - 1) await new Promise(r => setTimeout(r, 500 * (i + 1)));
+        if (i < attempts - 1) await new Promise(r => setTimeout(r, 300 * (i + 1)));
     }
     return null;
 }
@@ -129,12 +129,12 @@ async function resolveUsernames(userIds) {
                         data.forEach(u => { map[u.id] = u.displayName || u.name; });
                         return true;
                     }
-                    await new Promise(r => setTimeout(r, 1500 * attempt));
+                    await new Promise(r => setTimeout(r, 500 * attempt));
                 } else if (res.status === 429) {
                     const retryAfter = Number(res.headers.get('retry-after')) || 0;
-                    await new Promise(r => setTimeout(r, Math.max(retryAfter * 1000, 1500 * attempt)));
+                    await new Promise(r => setTimeout(r, Math.max(retryAfter * 1000, 800 * attempt)));
                 } else {
-                    await new Promise(r => setTimeout(r, 500 * attempt));
+                    await new Promise(r => setTimeout(r, 300 * attempt));
                 }
             } catch (_) {
                 await new Promise(r => setTimeout(r, 500 * attempt));
@@ -143,7 +143,7 @@ async function resolveUsernames(userIds) {
         return false;
     }
 
-    const results = await mapWithConcurrency(batches, 5, resolveBatch);
+    const results = await mapWithConcurrency(batches, 10, resolveBatch);
     const failedBatches = results.filter(ok => !ok).length;
     if (failedBatches) console.log(`resolveUsernames: ${failedBatches} batch(es) never succeeded after retries.`);
     return map;
@@ -151,11 +151,15 @@ async function resolveUsernames(userIds) {
 
 const startedAt = Date.now();
 
+const pageResults = await Promise.all(
+    Array.from({ length: TOP_PAGES }, (_, i) =>
+        fetchJson(`${API_BASE}/clans?page=${i + 1}&pageSize=${PAGE_SIZE}&sort=Points&sortOrder=desc`)
+    )
+);
 const summaries = [];
-for (let page = 1; page <= TOP_PAGES; page++) {
-    const json = await fetchJson(`${API_BASE}/clans?page=${page}&pageSize=${PAGE_SIZE}&sort=Points&sortOrder=desc`);
+for (const json of pageResults) {
     const data = json?.data;
-    if (!Array.isArray(data) || !data.length) break;
+    if (!Array.isArray(data) || !data.length) continue;
     for (const raw of data) {
         summaries.push({
             Name: firstDefined(raw.Name, raw.name, raw.ClanName, raw.clanName) || 'Unknown',
@@ -175,6 +179,9 @@ if (!summaries.length) {
 console.log(`Fetched ${summaries.length} clan summaries. Fetching detail…`);
 
 const clans = await mapWithConcurrency(summaries, DETAIL_CONCURRENCY, async summary => {
+    if (summary.Points <= 0) {
+        return { Name: summary.Name, Points: 0, Members: summary.Members, roster: [] };
+    }
     const detailJson = await fetchJson(`${API_BASE}/clan/${encodeURIComponent(summary.Name)}`);
     const detail = detailJson?.data;
 
