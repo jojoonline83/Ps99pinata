@@ -1,0 +1,20 @@
+name: Discord Alert
+
+on:
+  workflow_dispatch:
+    inputs:
+      message:
+        description: 'Message to send'
+        required: true
+        default: '<@&967089828837597264> jojo8 and javierplayz are dc'
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Discord webhook
+        run: |
+          curl -s -X POST \
+            -H "Content-Type: application/json" \
+            "https://discord.com/api/webhooks/1499732518692196485/U2pJIrJIPPjIVLTn2VlGtvuGlAaChRLiYqEFXe3AZj0l-YHRTebD16x4mn-WxDn9MXc1" \
+            -d "{\"content\":\"${{ github.event.inputs.message }}\",\"allowed_mentions\":{\"roles\":[\"967089828837597264\"]}}"
