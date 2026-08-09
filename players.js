@@ -264,7 +264,9 @@ async function searchPlayers() {
 
     const queryLower = query.toLowerCase();
     const localMatches = allPlayers().filter(p =>
-        p.DisplayName.toLowerCase().includes(queryLower) || String(p.UserID) === query
+        p.DisplayName.toLowerCase().includes(queryLower) ||
+        String(p.UserID) === query ||
+        (p.Clan && p.Clan.toLowerCase().includes(queryLower))
     );
 
     state.searchResults = localMatches;
