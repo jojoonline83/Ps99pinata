@@ -468,6 +468,24 @@ async function resolveUsernames(userIds) {
             });
         }
     }
+
+    const stillMissing = userIds.filter(id => !map[id] && !map[String(id)]);
+    if (stillMissing.length && stillMissing.length <= 100) {
+        await Promise.all(stillMissing.map(async uid => {
+            const url = `https://users.roblox.com/v1/users/${uid}`;
+            for (const proxy of CORS_PROXIES) {
+                try {
+                    const res = await fetch(`${proxy}${encodeURIComponent(url)}`, { signal: AbortSignal.timeout(8000) });
+                    if (res.ok) {
+                        const u = await res.json();
+                        const display = u.displayName || u.name;
+                        if (display) { map[uid] = display; map[String(uid)] = display; }
+                        return;
+                    }
+                } catch (_) {}
+            }
+        }));
+    }
     return map;
 }
 
