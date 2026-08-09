@@ -202,10 +202,16 @@ function renderPlayerDetail(userId) {
     const color = colorFor(userId);
     const rank = players.indexOf(player) + 1;
 
+    const clanMembers = player.Clan
+        ? players.filter(p => p.Clan === player.Clan).sort((a, b) => b.Points - a.Points)
+        : [];
+    const clanRank = clanMembers.findIndex(p => p.UserID === userId) + 1;
+
     document.getElementById('player-detail-color-bar').style.background = color;
     document.getElementById('player-detail-name').textContent = player.DisplayName;
     document.getElementById('player-detail-sub').textContent = `User ID: ${player.UserID}`;
     document.getElementById('pd-rank').textContent = `#${fmt(rank)}`;
+    document.getElementById('pd-clan-rank').textContent = clanRank > 0 ? `#${clanRank} / ${clanMembers.length}` : '—';
     document.getElementById('pd-pts').textContent = fmt(player.Points);
     document.getElementById('pd-clan').textContent = player.Clan || '—';
 
