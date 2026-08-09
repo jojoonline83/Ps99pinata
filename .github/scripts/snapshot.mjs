@@ -277,20 +277,25 @@ function findSnapNear(hist, latest, msAgo, tolMs) {
     return best && bestDiff <= tolMs ? best : null;
 }
 
-async function sendDiscord(msg) {
+function fmtNum(n) {
+    return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
+async function sendDiscordEmbed(embed) {
     try {
         const res = await fetch(DISCORD_WEBHOOK, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                content: msg,
+                content: `<@&${DISCORD_ROLE_ID}>`,
+                embeds: [embed],
                 allowed_mentions: { roles: [DISCORD_ROLE_ID] },
             }),
             signal: AbortSignal.timeout(10000),
         });
-        console.log(`Discord alert sent (${res.status}): ${msg}`);
+        console.log(`Discord embed sent (${res.status}): ${embed.title}`);
     } catch (e) {
-        console.log(`Discord alert failed: ${e.message}`);
+        console.log(`Discord embed failed: ${e.message}`);
     }
 }
 
@@ -323,7 +328,7 @@ if (history.length >= 2) {
             if (delta === 0) {
                 if (!alertState[nameLower][key]) {
                     alertState[nameLower][key] = true;
-                    alerts.push({ name: current.DisplayName, window: w.label });
+                    alerts.push({ name: current.DisplayName, window: w.label, points: current.Points, clan: current.Clan });
                 }
             } else {
                 alertState[nameLower][key] = false;
@@ -332,14 +337,28 @@ if (history.length >= 2) {
     }
 
     if (alerts.length) {
-        const grouped = {};
+        const byPlayer = {};
         for (const a of alerts) {
-            if (!grouped[a.window]) grouped[a.window] = [];
-            grouped[a.window].push(a.name);
+            if (!byPlayer[a.name]) byPlayer[a.name] = { name: a.name, points: a.points, clan: a.clan, windows: [] };
+            byPlayer[a.name].windows.push(a.window);
         }
-        for (const [window, names] of Object.entries(grouped)) {
-            const msg = `<@&${DISCORD_ROLE_ID}> ${names.join(' and ')} dc for ${window} (0 point gain)`;
-            await sendDiscord(msg);
+        const pad = n => String(n).padStart(2, '0');
+        const d = new Date();
+        const dateStr = `${pad(d.getUTCDate())}/${pad(d.getUTCMonth() + 1)}/${d.getUTCFullYear()}`;
+        const timeStr = `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+        for (const player of Object.values(byPlayer)) {
+            const embed = {
+                title: `⚠️ ${player.name} — No Point Gain`,
+                description: `**${player.name}** has **0 points gained** in the last **${player.windows[0]}**.`,
+                color: 0xFF8C00,
+                fields: [
+                    { name: 'Current Points', value: fmtNum(player.points), inline: true },
+                    { name: 'League', value: player.clan || 'Unknown', inline: true },
+                    { name: 'Zero-gain Windows', value: player.windows.join(', '), inline: false },
+                ],
+                footer: { text: `PS99 Clan Battle Tracker | ${dateStr} ${timeStr}` },
+            };
+            await sendDiscordEmbed(embed);
         }
     }
 
