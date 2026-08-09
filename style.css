@@ -70,6 +70,31 @@ main {
     padding: 28px 24px;
 }
 
+.page-nav {
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 12px 24px 0;
+    display: flex;
+    gap: 4px;
+}
+.nav-tab {
+    padding: 10px 20px;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    text-decoration: none;
+    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+    border: 1px solid transparent;
+    border-bottom: none;
+    transition: background .15s, color .15s;
+}
+.nav-tab:hover { color: var(--text-primary); background: var(--bg-card); }
+.nav-tab.active {
+    color: var(--gold);
+    background: var(--bg-card);
+    border-color: var(--border);
+}
+
 .view { display: none; }
 .view.active { display: block; }
 
