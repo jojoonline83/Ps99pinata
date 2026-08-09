@@ -16,6 +16,7 @@ const PALETTE = [
 ];
 
 let historyData = [];
+let resolvedNamesCache = {};
 
 let state = {
     mode: 'top',
@@ -243,8 +244,26 @@ async function apiFetch(url) {
 }
 
 async function loadHistory() {
-    const res = await fetch(`history.json?t=${Date.now()}`, { signal: AbortSignal.timeout(30000) });
-    if (res.ok) historyData = await res.json();
+    const [histRes, namesRes] = await Promise.all([
+        fetch(`history.json?t=${Date.now()}`, { signal: AbortSignal.timeout(30000) }),
+        fetch(`resolved_names.json?t=${Date.now()}`, { signal: AbortSignal.timeout(10000) }).catch(() => null),
+    ]);
+    if (namesRes && namesRes.ok) {
+        try { resolvedNamesCache = await namesRes.json(); } catch (_) {}
+    }
+    if (histRes.ok) {
+        historyData = await histRes.json();
+        for (const snap of historyData) {
+            for (const clan of (snap.clans || [])) {
+                for (const p of (clan.roster || [])) {
+                    if (p.DisplayName === String(p.UserID)) {
+                        const cached = resolvedNamesCache[p.UserID] || resolvedNamesCache[String(p.UserID)];
+                        if (cached) p.DisplayName = cached;
+                    }
+                }
+            }
+        }
+    }
 }
 
 function hasRosterData(entry) {
@@ -445,14 +464,8 @@ function isUnresolvedName(entity) {
     return !!(entity && entity.UserID && entity.DisplayName === String(entity.UserID));
 }
 
-let resolvedNamesCachePromise = null;
 function getResolvedNamesCache() {
-    if (!resolvedNamesCachePromise) {
-        resolvedNamesCachePromise = fetch(`resolved_names.json?t=${Date.now()}`)
-            .then(res => (res.ok ? res.json() : {}))
-            .catch(() => ({}));
-    }
-    return resolvedNamesCachePromise;
+    return Promise.resolve(resolvedNamesCache);
 }
 
 function firstDefined(...args) {
