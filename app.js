@@ -108,17 +108,28 @@ function openClanDetail(name) {
     if (fromSnapshot) {
         ui.currentClanDetail = fromSnapshot;
         const idx = topClans().indexOf(fromSnapshot);
-        if (idx !== -1) {
-            ui.currentRank = idx + 1;
-            renderClanDetail();
-        } else {
-            ui.currentRank = undefined;
-            renderClanDetail();
-        }
+        ui.currentRank = idx !== -1 ? idx + 1 : undefined;
+        renderClanDetail();
+        resolveRosterNames(fromSnapshot.roster, name);
         refreshClanDetailLive(name);
         return;
     }
     fetchClanDetailLive(name);
+}
+
+async function resolveRosterNames(roster, clanName) {
+    if (!roster || !roster.length) return;
+    const unresolved = roster.filter(p => p.DisplayName === String(p.UserID)).map(p => p.UserID);
+    if (!unresolved.length) return;
+    const resolved = await resolveUsernames([...new Set(unresolved)]);
+    let changed = 0;
+    for (const p of roster) {
+        if (p.DisplayName === String(p.UserID)) {
+            const name = resolved[p.UserID] || resolved[String(p.UserID)];
+            if (name) { p.DisplayName = name; changed++; }
+        }
+    }
+    if (changed && ui.currentClanName === clanName) renderClanDetail();
 }
 
 function renderLeaderboard() {
