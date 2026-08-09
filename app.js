@@ -436,7 +436,10 @@ function clearSearch() {
 async function resolveUsernames(userIds) {
     if (!userIds.length) return {};
     const map = {};
-    const ROBLOX_URL = 'https://users.roblox.com/v1/users';
+    const ROBLOX_URLS = [
+        'https://users.roproxy.com/v1/users',
+        'https://users.roblox.com/v1/users',
+    ];
 
     for (let i = 0; i < userIds.length; i += 100) {
         const batch = userIds.slice(i, i + 100).map(Number).filter(id => id > 0);
@@ -446,16 +449,10 @@ async function resolveUsernames(userIds) {
         const headers = { 'Content-Type': 'application/json' };
         let parsed = null;
 
-        try {
-            const res = await fetch(ROBLOX_URL, { method: 'POST', headers, body, signal: AbortSignal.timeout(8000) });
-            if (res.ok) parsed = await res.json();
-        } catch (_) {}
-        for (const proxy of CORS_PROXIES) {
+        for (const url of ROBLOX_URLS) {
             if (parsed) break;
             try {
-                const res = await fetch(`${proxy}${encodeURIComponent(ROBLOX_URL)}`, {
-                    method: 'POST', headers, body, signal: AbortSignal.timeout(12000),
-                });
+                const res = await fetch(url, { method: 'POST', headers, body, signal: AbortSignal.timeout(10000) });
                 if (res.ok) parsed = await res.json();
             } catch (_) {}
         }
@@ -467,24 +464,6 @@ async function resolveUsernames(userIds) {
                 map[String(u.id)] = display;
             });
         }
-    }
-
-    const stillMissing = userIds.filter(id => !map[id] && !map[String(id)]);
-    if (stillMissing.length && stillMissing.length <= 100) {
-        await Promise.all(stillMissing.map(async uid => {
-            const url = `https://users.roblox.com/v1/users/${uid}`;
-            for (const proxy of CORS_PROXIES) {
-                try {
-                    const res = await fetch(`${proxy}${encodeURIComponent(url)}`, { signal: AbortSignal.timeout(8000) });
-                    if (res.ok) {
-                        const u = await res.json();
-                        const display = u.displayName || u.name;
-                        if (display) { map[uid] = display; map[String(uid)] = display; }
-                        return;
-                    }
-                } catch (_) {}
-            }
-        }));
     }
     return map;
 }

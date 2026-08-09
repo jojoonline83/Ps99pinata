@@ -308,26 +308,22 @@ const CORS_PROXIES = [
 
 async function resolveUsernamesBrowser(userIds) {
     const map = {};
-    const ROBLOX_URL = 'https://users.roblox.com/v1/users';
+    const ROBLOX_URLS = [
+        'https://users.roproxy.com/v1/users',
+        'https://users.roblox.com/v1/users',
+    ];
     for (let i = 0; i < userIds.length; i += 100) {
         const batch = userIds.slice(i, i + 100).map(Number).filter(id => id > 0);
         if (!batch.length) continue;
         const body = JSON.stringify({ userIds: batch, excludeBannedUsers: false });
         const headers = { 'Content-Type': 'application/json' };
         let parsed = null;
-        try {
-            const res = await fetch(ROBLOX_URL, { method: 'POST', headers, body, signal: AbortSignal.timeout(8000) });
-            if (res.ok) parsed = await res.json();
-        } catch (_) {}
-        if (!parsed) {
-            for (const proxy of CORS_PROXIES) {
-                try {
-                    const res = await fetch(`${proxy}${encodeURIComponent(ROBLOX_URL)}`, {
-                        method: 'POST', headers, body, signal: AbortSignal.timeout(12000),
-                    });
-                    if (res.ok) { parsed = await res.json(); break; }
-                } catch (_) {}
-            }
+        for (const url of ROBLOX_URLS) {
+            if (parsed) break;
+            try {
+                const res = await fetch(url, { method: 'POST', headers, body, signal: AbortSignal.timeout(10000) });
+                if (res.ok) parsed = await res.json();
+            } catch (_) {}
         }
         if (parsed) {
             (parsed.data || []).forEach(u => {
@@ -337,24 +333,6 @@ async function resolveUsernamesBrowser(userIds) {
                 resolvedNamesCache[String(u.id)] = name;
             });
         }
-    }
-
-    const stillMissing = userIds.filter(id => !map[id] && !map[String(id)]);
-    if (stillMissing.length && stillMissing.length <= 200) {
-        await Promise.all(stillMissing.map(async uid => {
-            const url = `https://users.roblox.com/v1/users/${uid}`;
-            for (const proxy of CORS_PROXIES) {
-                try {
-                    const res = await fetch(`${proxy}${encodeURIComponent(url)}`, { signal: AbortSignal.timeout(8000) });
-                    if (res.ok) {
-                        const u = await res.json();
-                        const name = u.displayName || u.name;
-                        if (name) { map[uid] = name; resolvedNamesCache[uid] = name; resolvedNamesCache[String(uid)] = name; }
-                        return;
-                    }
-                } catch (_) {}
-            }
-        }));
     }
     return map;
 }
