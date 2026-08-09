@@ -286,6 +286,66 @@ function clearSearch() {
     if (state.mode === 'search') { state.mode = 'top'; save(); renderLeaderboard(); }
 }
 
+const CORS_PROXIES = [
+    'https://corsproxy.io/?url=',
+    'https://api.allorigins.win/raw?url=',
+];
+
+async function resolveUsernamesBrowser(userIds) {
+    const map = {};
+    const ROBLOX_URL = 'https://users.roblox.com/v1/users';
+    for (let i = 0; i < userIds.length; i += 100) {
+        const batch = userIds.slice(i, i + 100).map(Number).filter(id => id > 0);
+        if (!batch.length) continue;
+        const body = JSON.stringify({ userIds: batch, excludeBannedUsers: false });
+        const headers = { 'Content-Type': 'application/json' };
+        let parsed = null;
+        try {
+            const res = await fetch(ROBLOX_URL, { method: 'POST', headers, body, signal: AbortSignal.timeout(8000) });
+            if (res.ok) parsed = await res.json();
+        } catch (_) {}
+        if (!parsed) {
+            for (const proxy of CORS_PROXIES) {
+                try {
+                    const res = await fetch(`${proxy}${encodeURIComponent(ROBLOX_URL)}`, {
+                        method: 'POST', headers, body, signal: AbortSignal.timeout(12000),
+                    });
+                    if (res.ok) { parsed = await res.json(); break; }
+                } catch (_) {}
+            }
+        }
+        if (parsed) {
+            (parsed.data || []).forEach(u => {
+                const name = u.displayName || u.name;
+                map[u.id] = name;
+                resolvedNamesCache[u.id] = name;
+                resolvedNamesCache[String(u.id)] = name;
+            });
+        }
+    }
+    return map;
+}
+
+async function resolveUnresolvedPlayers() {
+    const players = allPlayers();
+    const unresolved = players.filter(p => p.DisplayName === String(p.UserID)).map(p => p.UserID);
+    if (!unresolved.length) return;
+    console.log(`Resolving ${unresolved.length} player names via Roblox API…`);
+    const resolved = await resolveUsernamesBrowser(unresolved);
+    const count = Object.keys(resolved).length;
+    if (!count) return;
+    for (const snap of playerSnapshots) {
+        for (const [, p] of snap.players.byId) {
+            if (p.DisplayName === String(p.UserID) && resolved[p.UserID]) {
+                p.DisplayName = resolved[p.UserID];
+            }
+        }
+        snap.players.list = [...snap.players.byId.values()].sort((a, b) => b.Points - a.Points);
+    }
+    renderLeaderboard();
+    console.log(`Resolved ${count}/${unresolved.length} player names.`);
+}
+
 async function loadHistory() {
     const [histRes, namesRes] = await Promise.all([
         fetch(`history.json?t=${Date.now()}`, { signal: AbortSignal.timeout(30000) }),
@@ -311,6 +371,7 @@ async function refreshAll({ silent = false } = {}) {
         await loadHistory();
         renderLeaderboard();
         if (!silent) toast(`Loaded ${fmt(allPlayers().length)} players`, 'success');
+        resolveUnresolvedPlayers();
     } catch (err) {
         if (!silent) toast(err.message || 'Failed to refresh', 'error');
     } finally {
