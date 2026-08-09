@@ -436,35 +436,49 @@ function clearSearch() {
 async function resolveUsernames(userIds) {
     if (!userIds.length) return {};
     const map = {};
-    const ROBLOX_URLS = [
-        'https://users.roproxy.com/v1/users',
-        'https://users.roblox.com/v1/users',
-    ];
 
     for (let i = 0; i < userIds.length; i += 100) {
         const batch = userIds.slice(i, i + 100).map(Number).filter(id => id > 0);
         if (!batch.length) continue;
-
-        const body    = JSON.stringify({ userIds: batch, excludeBannedUsers: false });
+        const body = JSON.stringify({ userIds: batch, excludeBannedUsers: false });
         const headers = { 'Content-Type': 'application/json' };
         let parsed = null;
-
-        for (const url of ROBLOX_URLS) {
-            if (parsed) break;
-            try {
-                const res = await fetch(url, { method: 'POST', headers, body, signal: AbortSignal.timeout(10000) });
-                if (res.ok) parsed = await res.json();
-            } catch (_) {}
-        }
-
-        if (parsed) {
-            (parsed.data || []).forEach(u => {
-                const display = u.displayName || u.name;
-                map[u.id] = display;
-                map[String(u.id)] = display;
+        try {
+            const res = await fetch('https://users.roproxy.com/v1/users', { method: 'POST', headers, body, signal: AbortSignal.timeout(10000) });
+            if (res.ok) parsed = await res.json();
+        } catch (_) {}
+        if (parsed && parsed.data && parsed.data.length) {
+            parsed.data.forEach(u => {
+                const n = u.displayName || u.name;
+                map[u.id] = n; map[String(u.id)] = n;
             });
         }
     }
+
+    if (Object.keys(map).length > 0) return map;
+
+    const remaining = userIds.map(Number).filter(id => id > 0 && !map[id]).slice(0, 200);
+    if (!remaining.length) return map;
+    let idx = 0;
+    async function worker() {
+        while (idx < remaining.length) {
+            const uid = remaining[idx++];
+            for (const makeFn of [
+                u => ({ url: `https://api.allorigins.win/get?url=${encodeURIComponent(`https://users.roblox.com/v1/users/${u}`)}`, wrap: true }),
+                u => ({ url: `https://corsproxy.io/?url=${encodeURIComponent(`https://users.roblox.com/v1/users/${u}`)}`, wrap: false }),
+            ]) {
+                try {
+                    const { url, wrap } = makeFn(uid);
+                    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+                    if (!res.ok) continue;
+                    const data = wrap ? JSON.parse((await res.json()).contents) : await res.json();
+                    const n = data.displayName || data.name;
+                    if (n) { map[uid] = n; map[String(uid)] = n; break; }
+                } catch (_) {}
+            }
+        }
+    }
+    await Promise.all(Array.from({ length: Math.min(10, remaining.length) }, () => worker()));
     return map;
 }
 

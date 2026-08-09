@@ -289,6 +289,27 @@ async function searchPlayers() {
 
     if (localMatches.length) {
         setStatus(`Found ${localMatches.length} player(s).`, 'success');
+        const unresolved = localMatches.filter(p => p.DisplayName === String(p.UserID)).map(p => p.UserID);
+        if (unresolved.length) {
+            setStatus(`Found ${localMatches.length} player(s). Resolving ${unresolved.length} name(s)…`, 'loading');
+            const resolved = await resolveUsernamesBrowser(unresolved);
+            const count = Object.keys(resolved).length;
+            if (count) {
+                for (const p of localMatches) {
+                    if (p.DisplayName === String(p.UserID) && (resolved[p.UserID] || resolved[String(p.UserID)])) {
+                        p.DisplayName = resolved[p.UserID] || resolved[String(p.UserID)];
+                    }
+                }
+                for (const snap of playerSnapshots) {
+                    for (const [, sp] of snap.players.byId) {
+                        if (sp.DisplayName === String(sp.UserID) && resolved[sp.UserID]) sp.DisplayName = resolved[sp.UserID];
+                    }
+                    snap.players.list = [...snap.players.byId.values()].sort((a, b) => b.Points - a.Points);
+                }
+                renderLeaderboard();
+            }
+            setStatus(`Found ${localMatches.length} player(s). Resolved ${count} name(s).`, 'success');
+        }
     } else {
         setStatus(`No players found matching "${esc(query)}".`, 'error');
     }
@@ -308,37 +329,62 @@ const CORS_PROXIES = [
 
 async function resolveUsernamesBrowser(userIds) {
     const map = {};
-    const ROBLOX_URLS = [
-        'https://users.roproxy.com/v1/users',
-        'https://users.roblox.com/v1/users',
-    ];
+    if (!userIds.length) return map;
+
     for (let i = 0; i < userIds.length; i += 100) {
         const batch = userIds.slice(i, i + 100).map(Number).filter(id => id > 0);
         if (!batch.length) continue;
         const body = JSON.stringify({ userIds: batch, excludeBannedUsers: false });
         const headers = { 'Content-Type': 'application/json' };
         let parsed = null;
-        for (const url of ROBLOX_URLS) {
-            if (parsed) break;
-            try {
-                const res = await fetch(url, { method: 'POST', headers, body, signal: AbortSignal.timeout(10000) });
-                if (res.ok) parsed = await res.json();
-            } catch (_) {}
-        }
-        if (parsed) {
-            (parsed.data || []).forEach(u => {
-                const name = u.displayName || u.name;
-                map[u.id] = name;
-                resolvedNamesCache[u.id] = name;
-                resolvedNamesCache[String(u.id)] = name;
+        try {
+            const res = await fetch('https://users.roproxy.com/v1/users', { method: 'POST', headers, body, signal: AbortSignal.timeout(10000) });
+            if (res.ok) parsed = await res.json();
+        } catch (_) {}
+        if (parsed && parsed.data && parsed.data.length) {
+            parsed.data.forEach(u => {
+                const n = u.displayName || u.name;
+                map[u.id] = n;
+                resolvedNamesCache[u.id] = n;
+                resolvedNamesCache[String(u.id)] = n;
             });
         }
     }
+
+    if (Object.keys(map).length > 0) return map;
+
+    const remaining = userIds.map(Number).filter(id => id > 0 && !map[id]).slice(0, 200);
+    if (!remaining.length) return map;
+    let idx = 0;
+    async function worker() {
+        while (idx < remaining.length) {
+            const uid = remaining[idx++];
+            for (const makeFn of [
+                u => ({ url: `https://api.allorigins.win/get?url=${encodeURIComponent(`https://users.roblox.com/v1/users/${u}`)}`, wrap: true }),
+                u => ({ url: `https://corsproxy.io/?url=${encodeURIComponent(`https://users.roblox.com/v1/users/${u}`)}`, wrap: false }),
+            ]) {
+                try {
+                    const { url, wrap } = makeFn(uid);
+                    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+                    if (!res.ok) continue;
+                    const data = wrap ? JSON.parse((await res.json()).contents) : await res.json();
+                    const n = data.displayName || data.name;
+                    if (n) {
+                        map[uid] = n;
+                        resolvedNamesCache[uid] = n;
+                        resolvedNamesCache[String(uid)] = n;
+                        break;
+                    }
+                } catch (_) {}
+            }
+        }
+    }
+    await Promise.all(Array.from({ length: Math.min(10, remaining.length) }, () => worker()));
     return map;
 }
 
 async function resolveUnresolvedPlayers() {
-    const players = allPlayers();
+    const players = topPlayers();
     const unresolved = players.filter(p => p.DisplayName === String(p.UserID)).map(p => p.UserID);
     if (!unresolved.length) return;
     console.log(`Resolving ${unresolved.length} player names via Roblox API…`);
