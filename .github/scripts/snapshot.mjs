@@ -244,3 +244,104 @@ history = history.filter(entry => now - entry.ts <= RETENTION_MS);
 writeFileSync(HISTORY_FILE, JSON.stringify(history));
 const elapsedSec = ((Date.now() - startedAt) / 1000).toFixed(1);
 console.log(`Snapshot recorded: ${clans.length} clans with roster detail in ${elapsedSec}s, ${history.length} snapshots retained.`);
+
+const DISCORD_WEBHOOK = 'https://discord.com/api/webhooks/1499732518692196485/U2pJIrJIPPjIVLTn2VlGtvuGlAaChRLiYqEFXe3AZj0l-YHRTebD16x4mn-WxDn9MXc1';
+const DISCORD_ROLE_ID = '967089828837597264';
+const ALERT_STATE_FILE = 'alert_state.json';
+const WATCH_PLAYERS = ['jojo8', 'javierplayz'];
+const DC_WINDOWS = [
+    { label: '10m', ms: 10 * 60_000, tol: 11 * 60_000 },
+    { label: '30m', ms: 30 * 60_000, tol: 8  * 60_000 },
+    { label: '60m', ms: 60 * 60_000, tol: 12 * 60_000 },
+];
+
+function findPlayerInSnapshot(snap, nameLower) {
+    for (const c of snap.clans || []) {
+        for (const p of c.roster || []) {
+            if (String(p.DisplayName).toLowerCase() === nameLower) return { ...p, Clan: c.Name };
+        }
+    }
+    return null;
+}
+
+function findSnapNear(hist, latest, msAgo, tolMs) {
+    const target = latest.ts - msAgo;
+    const minAge = msAgo / 2;
+    let best = null, bestDiff = Infinity;
+    for (const s of hist) {
+        if (s === latest) continue;
+        if (latest.ts - s.ts < minAge) continue;
+        const d = Math.abs(s.ts - target);
+        if (d < bestDiff) { bestDiff = d; best = s; }
+    }
+    return best && bestDiff <= tolMs ? best : null;
+}
+
+async function sendDiscord(msg) {
+    try {
+        const res = await fetch(DISCORD_WEBHOOK, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                content: msg,
+                allowed_mentions: { roles: [DISCORD_ROLE_ID] },
+            }),
+            signal: AbortSignal.timeout(10000),
+        });
+        console.log(`Discord alert sent (${res.status}): ${msg}`);
+    } catch (e) {
+        console.log(`Discord alert failed: ${e.message}`);
+    }
+}
+
+if (history.length >= 2) {
+    let alertState = {};
+    if (existsSync(ALERT_STATE_FILE)) {
+        try { alertState = JSON.parse(readFileSync(ALERT_STATE_FILE, 'utf8')); } catch (_) { alertState = {}; }
+    }
+
+    const latest = history[history.length - 1];
+    const alerts = [];
+
+    for (const name of WATCH_PLAYERS) {
+        const nameLower = name.toLowerCase();
+        const current = findPlayerInSnapshot(latest, nameLower);
+        if (!current) continue;
+
+        if (!alertState[nameLower]) alertState[nameLower] = {};
+
+        for (const w of DC_WINDOWS) {
+            const pastSnap = findSnapNear(history, latest, w.ms, w.tol);
+            if (!pastSnap) continue;
+
+            const past = findPlayerInSnapshot(pastSnap, nameLower);
+            if (!past) continue;
+
+            const delta = current.Points - past.Points;
+            const key = w.label;
+
+            if (delta === 0) {
+                if (!alertState[nameLower][key]) {
+                    alertState[nameLower][key] = true;
+                    alerts.push({ name: current.DisplayName, window: w.label });
+                }
+            } else {
+                alertState[nameLower][key] = false;
+            }
+        }
+    }
+
+    if (alerts.length) {
+        const grouped = {};
+        for (const a of alerts) {
+            if (!grouped[a.window]) grouped[a.window] = [];
+            grouped[a.window].push(a.name);
+        }
+        for (const [window, names] of Object.entries(grouped)) {
+            const msg = `<@&${DISCORD_ROLE_ID}> ${names.join(' and ')} dc for ${window} (0 point gain)`;
+            await sendDiscord(msg);
+        }
+    }
+
+    writeFileSync(ALERT_STATE_FILE, JSON.stringify(alertState));
+}
