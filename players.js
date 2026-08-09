@@ -283,7 +283,123 @@ async function searchPlayers() {
 function clearSearch() {
     document.getElementById('search-player-name').value = '';
     document.getElementById('search-status').innerHTML = '';
+    document.getElementById('clan-search-status').innerHTML = '';
     if (state.mode === 'search') { state.mode = 'top'; save(); renderLeaderboard(); }
+}
+
+function firstDefined(...args) {
+    for (const a of args) if (a !== undefined && a !== null) return a;
+    return undefined;
+}
+function asNumber(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; }
+
+async function searchByClan() {
+    const input = document.getElementById('search-clan-name');
+    const query = (input?.value || '').trim();
+    if (!query) { toast('Enter a clan name', 'error'); return; }
+
+    const btn = document.getElementById('search-clan-btn');
+    const setStatus = (msg, type = '') => {
+        const el = document.getElementById('clan-search-status');
+        el.className = `import-status ${type}`;
+        el.innerHTML = type === 'loading' ? `<span class="spinner"></span>${msg}` : msg;
+    };
+
+    btn.disabled = true;
+    setStatus(`Fetching clan "${esc(query)}" from API…`, 'loading');
+
+    try {
+        const API_BASE = 'https://ps99.biggamesapi.io/api';
+        let json = null;
+        try {
+            const res = await fetch(`${API_BASE}/clan/${encodeURIComponent(query)}`, { signal: AbortSignal.timeout(10000) });
+            if (res.ok) json = await res.json();
+        } catch (_) {}
+        if (!json || json.status !== 'ok') {
+            for (const proxy of CORS_PROXIES) {
+                try {
+                    const res = await fetch(`${proxy}${encodeURIComponent(`${API_BASE}/clan/${encodeURIComponent(query)}`)}`, { signal: AbortSignal.timeout(15000) });
+                    if (res.ok) { json = await res.json(); if (json?.status === 'ok') break; }
+                } catch (_) {}
+            }
+        }
+        if (!json || json.status !== 'ok' || !json.data) throw new Error('Clan not found');
+
+        const raw = json.data;
+        const members = Array.isArray(raw.Members) ? raw.Members : [];
+        const battles = raw.Battles || raw.battles || {};
+        const battleKeys = Object.keys(battles);
+        let battleData = battleKeys.length ? battles[battleKeys[battleKeys.length - 1]] : null;
+
+        let contribRows = [];
+        if (battleData) {
+            contribRows = firstDefined(
+                battleData.PointContributions, battleData.pointContributions,
+                battleData.Contributions, battleData.contributions,
+                battleData.Contribution, battleData.contribution
+            ) || [];
+            if (!Array.isArray(contribRows)) contribRows = [];
+        }
+        if (!contribRows.length) {
+            const fb = firstDefined(
+                raw.Contribution?.Battle, raw.contribution?.battle,
+                raw.Contributions?.Battle, raw.contributions?.battle
+            );
+            if (Array.isArray(fb)) contribRows = fb;
+        }
+
+        const contribByUser = {};
+        for (const c of contribRows) {
+            const uid = asNumber(firstDefined(c.UserID, c.UserId, c.user_id, c.userId, c.id));
+            const pts = asNumber(firstDefined(c.Points, c.points, c.TotalPoints, c.total_points, c.Score, c.score, c.Value, c.value));
+            if (uid > 0) contribByUser[uid] = pts;
+        }
+
+        const roster = [];
+        const seen = new Set();
+        for (const m of members) {
+            const uid = asNumber(firstDefined(m.UserID, m.UserId, m.user_id, m.userId, m.id));
+            if (uid <= 0) continue;
+            seen.add(uid);
+            roster.push({ UserID: uid, DisplayName: String(uid), Points: contribByUser[uid] ?? 0 });
+        }
+        for (const [uidStr, pts] of Object.entries(contribByUser)) {
+            const uid = Number(uidStr);
+            if (!seen.has(uid) && uid > 0) roster.push({ UserID: uid, DisplayName: String(uid), Points: pts });
+        }
+
+        roster.sort((a, b) => b.Points - a.Points);
+
+        setStatus(`Resolving ${roster.length} player names…`, 'loading');
+        const needIds = roster.filter(p => {
+            const cached = resolvedNamesCache[p.UserID] || resolvedNamesCache[String(p.UserID)];
+            if (cached) { p.DisplayName = cached; return false; }
+            return true;
+        }).map(p => p.UserID);
+
+        if (needIds.length) {
+            const resolved = await resolveUsernamesBrowser(needIds);
+            roster.forEach(p => {
+                if (p.DisplayName === String(p.UserID) && resolved[p.UserID]) p.DisplayName = resolved[p.UserID];
+            });
+        }
+
+        const clanName = raw.Name || raw.name || query;
+        state.searchResults = roster.map(p => ({
+            UserID: p.UserID,
+            DisplayName: p.DisplayName,
+            Points: p.Points,
+            Clan: clanName,
+        }));
+        state.mode = 'search';
+        save();
+        renderLeaderboard();
+        setStatus(`Found ${roster.length} player(s) in clan "${esc(clanName)}".`, 'success');
+    } catch (err) {
+        setStatus(`Clan "${esc(query)}" not found — check the exact name.`, 'error');
+    } finally {
+        btn.disabled = false;
+    }
 }
 
 const CORS_PROXIES = [
@@ -385,6 +501,10 @@ document.getElementById('search-player-btn').addEventListener('click', searchPla
 document.getElementById('clear-search-btn').addEventListener('click', clearSearch);
 document.getElementById('search-player-name').addEventListener('keydown', e => {
     if (e.key === 'Enter') { e.preventDefault(); searchPlayers(); }
+});
+document.getElementById('search-clan-btn').addEventListener('click', searchByClan);
+document.getElementById('search-clan-name').addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); searchByClan(); }
 });
 
 setInterval(() => refreshAll({ silent: true }), 10 * 60_000);
