@@ -8,6 +8,7 @@ const PALETTE = [
 
 let historyData = [];
 let playerSnapshots = [];
+let resolvedNamesCache = {};
 let state = { mode: 'top', searchResults: [], colorByUser: {}, nextColorIdx: 0 };
 const DISPLAY_LIMIT = 1000;
 
@@ -39,6 +40,11 @@ function colorFor(userId) {
     return state.colorByUser[key];
 }
 
+function resolveDisplayName(p) {
+    if (p.DisplayName && p.DisplayName !== String(p.UserID)) return p.DisplayName;
+    return resolvedNamesCache[p.UserID] || resolvedNamesCache[String(p.UserID)] || String(p.UserID);
+}
+
 function extractPlayers(snapshot) {
     const playerMap = new Map();
     for (const clan of (snapshot.clans || [])) {
@@ -47,7 +53,7 @@ function extractPlayers(snapshot) {
             if (!existing || p.Points > existing.Points) {
                 playerMap.set(p.UserID, {
                     UserID: p.UserID,
-                    DisplayName: p.DisplayName,
+                    DisplayName: resolveDisplayName(p),
                     Points: p.Points,
                     Clan: clan.Name,
                 });
@@ -281,9 +287,15 @@ function clearSearch() {
 }
 
 async function loadHistory() {
-    const res = await fetch(`history.json?t=${Date.now()}`, { signal: AbortSignal.timeout(30000) });
-    if (res.ok) {
-        const raw = await res.json();
+    const [histRes, namesRes] = await Promise.all([
+        fetch(`history.json?t=${Date.now()}`, { signal: AbortSignal.timeout(30000) }),
+        fetch(`resolved_names.json?t=${Date.now()}`, { signal: AbortSignal.timeout(10000) }).catch(() => null),
+    ]);
+    if (namesRes && namesRes.ok) {
+        try { resolvedNamesCache = await namesRes.json(); } catch (_) {}
+    }
+    if (histRes.ok) {
+        const raw = await histRes.json();
         historyData = raw;
         playerSnapshots = raw.map(snap => ({
             ts: snap.ts,
