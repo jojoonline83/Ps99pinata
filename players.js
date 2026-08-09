@@ -177,10 +177,14 @@ function renderLeaderboard() {
         const d1h = playerDelta(p.UserID, p.Points, 60 * 60_000, 12 * 60_000);
         const globalRank = state.mode === 'search' ? globalList.findIndex(g => g.UserID === p.UserID) + 1 : idx + 1;
         const rankLabel = globalRank > 0 ? globalRank : '—';
+        const isResolved = p.DisplayName !== String(p.UserID);
+        const nameHtml = isResolved
+            ? `<div>${esc(p.DisplayName)}</div><div style="font-size:10px;color:var(--text-muted);font-weight:400">ID: ${p.UserID}</div>`
+            : `<div style="color:var(--text-muted)">${p.UserID}</div>`;
         return `
       <tr onclick="showPlayerDetail(${p.UserID})" style="cursor:pointer">
         <td class="player-rank">${rankLabel}</td>
-        <td class="player-name"><span class="st-team-dot" style="background:${color}"></span> ${esc(p.DisplayName)}</td>
+        <td class="player-name"><span class="st-team-dot" style="background:${color}"></span> <div>${nameHtml}</div></td>
         <td style="font-size:12px;color:var(--text-secondary)">${esc(p.Clan || '—')}</td>
         <td class="player-points" style="color:${color}">${fmt(p.Points)}</td>
         <td style="color:${d10.color};font-size:12px">${d10.text}</td>
