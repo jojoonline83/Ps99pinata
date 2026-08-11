@@ -220,11 +220,16 @@ function renderClanDetail() {
 
     const tbody = document.getElementById('roster-tbody');
     const roster = detail.roster || [];
+    const snapClan = latestSnapshot() ? findClanInSnapshot(latestSnapshot(), detail.Name) : null;
+    const snapRoster = snapClan?.roster || [];
+    const snapPointsById = {};
+    snapRoster.forEach(sp => { snapPointsById[sp.UserID] = sp.Points; });
     tbody.innerHTML = roster.length
         ? roster.map((p, idx) => {
-            const d10 = playerDelta(detail, p.UserID, p.Points, 10 * 60_000, 11 * 60_000);
-            const d30 = playerDelta(detail, p.UserID, p.Points, 30 * 60_000, 8  * 60_000);
-            const d1h = playerDelta(detail, p.UserID, p.Points, 60 * 60_000, 12 * 60_000);
+            const pts = snapPointsById[p.UserID] !== undefined ? snapPointsById[p.UserID] : p.Points;
+            const d10 = playerDelta(detail, p.UserID, pts, 10 * 60_000, 11 * 60_000);
+            const d30 = playerDelta(detail, p.UserID, pts, 30 * 60_000, 8  * 60_000);
+            const d1h = playerDelta(detail, p.UserID, pts, 60 * 60_000, 12 * 60_000);
             return `
               <tr>
                 <td class="player-rank">${idx + 1}</td>
@@ -323,8 +328,10 @@ function renderDeltaStat(elId, detail, windowMs, toleranceMs) {
     }
 
     const latest = latestSnapshot();
+    const latestClan = latest ? findClanInSnapshot(latest, detail.Name) : null;
+    const currentPoints = latestClan ? latestClan.Points : detail.Points;
     const ageMin = Math.round((latest.ts - snap.ts) / 60000);
-    const delta  = detail.Points - entry.Points;
+    const delta  = currentPoints - entry.Points;
     const sign   = delta >= 0 ? '+' : '−';
     el.textContent = `${sign}${fmt(Math.abs(delta))}`;
     el.title       = `From snapshot ${ageMin}m ago`;
