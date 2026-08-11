@@ -585,6 +585,7 @@ async function fetchClanDetailLive(name) {
     try {
         const res = await apiFetch(`${API_BASE}/clan/${encodeURIComponent(name)}`);
         const detail = await buildLiveDetail(res.data);
+        detail.Name = name;
 
         ui.currentClanDetail = detail;
         if (ui.currentClanName === name) {
@@ -605,6 +606,7 @@ async function refreshClanDetailLive(name) {
         if (ui.currentClanName !== name) return;
         const detail = await buildLiveDetail(res.data);
         if (ui.currentClanName !== name) return;
+        detail.Name = name;
         ui.currentClanDetail = detail;
         ui.livePointsAsOf = Date.now();
         renderClanDetail();
