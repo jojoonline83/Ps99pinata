@@ -104,8 +104,9 @@ function buildClanFromDetail(detail, summary) {
     };
 }
 
-async function resolveUsernames(userIds, deadlineMs = 180_000) {
+async function resolveUsernames(userIds, deadlineMs = 240_000) {
     const map = {};
+    const sent = new Set();
     const ROBLOX_URL = 'https://users.roblox.com/v1/users';
     const deadline = Date.now() + deadlineMs;
     const batches = [];
@@ -117,38 +118,42 @@ async function resolveUsernames(userIds, deadlineMs = 180_000) {
     let skipped = 0;
     async function resolveBatch(batch) {
         if (Date.now() > deadline) { skipped++; return false; }
-        for (let attempt = 1; attempt <= 3; attempt++) {
+        for (let attempt = 1; attempt <= 2; attempt++) {
             if (Date.now() > deadline) { skipped++; return false; }
             try {
                 const res = await fetch(ROBLOX_URL, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ userIds: batch, excludeBannedUsers: false }),
-                    signal: AbortSignal.timeout(6000),
+                    signal: AbortSignal.timeout(8000),
                 });
                 if (res.ok) {
                     const json = await res.json();
                     const data = json.data || [];
-                    if (data.length > 0) {
-                        data.forEach(u => { map[u.id] = u.displayName || u.name; });
-                        return true;
-                    }
-                    await new Promise(r => setTimeout(r, 300 * attempt));
+                    batch.forEach(uid => sent.add(uid));
+                    data.forEach(u => { map[u.id] = u.displayName || u.name; });
+                    return true;
                 } else if (res.status === 429) {
                     const retryAfter = Number(res.headers.get('retry-after')) || 0;
-                    await new Promise(r => setTimeout(r, Math.max(retryAfter * 1000, 500 * attempt)));
+                    await new Promise(r => setTimeout(r, Math.max(retryAfter * 1000, 800 * attempt)));
                 } else {
-                    await new Promise(r => setTimeout(r, 200 * attempt));
+                    await new Promise(r => setTimeout(r, 300 * attempt));
                 }
             } catch (_) {
-                await new Promise(r => setTimeout(r, 300 * attempt));
+                await new Promise(r => setTimeout(r, 500 * attempt));
             }
         }
         return false;
     }
 
-    await mapWithConcurrency(batches, 10, resolveBatch);
+    await mapWithConcurrency(batches, 5, resolveBatch);
     if (skipped) console.log(`resolveUsernames: ${skipped} batch(es) skipped (deadline).`);
+
+    let unresolvable = 0;
+    for (const uid of sent) {
+        if (!map[uid]) { map[uid] = String(uid); unresolvable++; }
+    }
+    if (unresolvable) console.log(`  ${unresolvable} user(s) marked unresolvable (Roblox returned no data).`);
     return map;
 }
 
