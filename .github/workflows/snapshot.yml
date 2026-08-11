@@ -1,6 +1,8 @@
 name: Snapshot Clan Battle Data
 
 on:
+  schedule:
+    - cron: '0,10,20,30,40,50 * * * *'
   workflow_dispatch:
 
 permissions:
@@ -17,7 +19,24 @@ jobs:
         with:
           ref: gh-pages
 
+      - name: Skip if a recent run already took a snapshot
+        id: guard
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          last_ok=$(gh run list --repo "${{ github.repository }}" --workflow snapshot.yml --status completed --json databaseId,createdAt --jq '.[0].createdAt' 2>/dev/null || echo "")
+          if [ -n "$last_ok" ]; then
+            age=$(( $(date +%s) - $(date -d "$last_ok" +%s) ))
+            if [ "$age" -lt 300 ]; then
+              echo "Last snapshot completed ${age}s ago — skipping."
+              echo "proceed=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+          echo "proceed=true" >> "$GITHUB_OUTPUT"
+
       - name: Record and push snapshot (retries on conflict)
+        if: steps.guard.outputs.proceed == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -41,4 +60,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           sleep 540
-          gh workflow run snapshot.yml --repo "${{ github.repository }}" --ref main
+          for attempt in 1 2 3; do
+            gh workflow run snapshot.yml --repo "${{ github.repository }}" --ref main && exit 0
+            echo "Dispatch attempt $attempt failed, retrying in 10s…"
+            sleep 10
+          done
+          echo "::warning::Self-dispatch failed after 3 attempts"
