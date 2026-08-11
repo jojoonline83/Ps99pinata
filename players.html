@@ -7,10 +7,10 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>PS99 Clan Battle Pinata — Individual Leaderboard</title>
-    <link rel="stylesheet" href="style.css?v=1">
+    <link rel="stylesheet" href="style.css?v=2">
     <script>
     (function(){
-        var V = 1;
+        var V = 3;
         var k = '_ps99cb_pinata_players_v';
         var stored = localStorage.getItem(k);
         localStorage.setItem(k, V);
@@ -89,24 +89,11 @@
             <div id="search-status" class="import-status"></div>
         </div>
 
-        <div class="manage-card live-card">
-            <div class="manage-card-header">
-                <h3>&#127981; Search by Clan</h3>
-                <span class="live-dot"></span>
-            </div>
-            <p class="live-desc">Look up any clan's roster live from the API &mdash; even if the clan isn't in the top rankings.</p>
-            <div class="live-manual">
-                <input type="text" id="search-clan-name" class="live-input" placeholder="Enter exact clan name (e.g. o88o)">
-                <button class="btn-live-secondary" id="search-clan-btn">Lookup</button>
-            </div>
-            <div id="clan-search-status" class="import-status"></div>
-        </div>
-
         <h3 class="sub-heading" id="leaderboard-heading">Top Players</h3>
         <div class="players-table-container">
             <table class="players-table">
                 <thead>
-                    <tr><th>#</th><th>Player</th><th>Clan</th><th>Points</th><th>&Delta;10m</th><th>&Delta;30m</th><th>&Delta;1Hr</th></tr>
+                    <tr><th>#</th><th>Display Name</th><th>Clan</th><th>Points</th><th>&Delta;10m</th><th>&Delta;30m</th><th>&Delta;1Hr</th></tr>
                 </thead>
                 <tbody id="leaderboard-tbody"></tbody>
             </table>
@@ -127,7 +114,8 @@
                 </div>
             </div>
             <div class="team-detail-stats">
-                <div class="stat-box"><span class="stat-label">Rank</span><span class="stat-value" id="pd-rank"></span></div>
+                <div class="stat-box"><span class="stat-label">Global Rank</span><span class="stat-value" id="pd-rank"></span></div>
+                <div class="stat-box"><span class="stat-label">Clan Rank</span><span class="stat-value" id="pd-clan-rank"></span></div>
                 <div class="stat-box"><span class="stat-label">Points</span><span class="stat-value" id="pd-pts"></span></div>
                 <div class="stat-box"><span class="stat-label">Clan</span><span class="stat-value" id="pd-clan"></span></div>
             </div>
@@ -152,6 +140,6 @@
 
 <div id="toast" class="toast"></div>
 
-<script src="players.js?v=1"></script>
+<script src="players.js?v=3"></script>
 </body>
 </html>

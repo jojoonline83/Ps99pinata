@@ -16,6 +16,7 @@ const PALETTE = [
 ];
 
 let historyData = [];
+let resolvedNamesCache = {};
 
 let state = {
     mode: 'top',
@@ -107,17 +108,28 @@ function openClanDetail(name) {
     if (fromSnapshot) {
         ui.currentClanDetail = fromSnapshot;
         const idx = topClans().indexOf(fromSnapshot);
-        if (idx !== -1) {
-            ui.currentRank = idx + 1;
-            renderClanDetail();
-        } else {
-            ui.currentRank = undefined;
-            renderClanDetail();
-        }
+        ui.currentRank = idx !== -1 ? idx + 1 : undefined;
+        renderClanDetail();
+        resolveRosterNames(fromSnapshot.roster, name);
         refreshClanDetailLive(name);
         return;
     }
     fetchClanDetailLive(name);
+}
+
+async function resolveRosterNames(roster, clanName) {
+    if (!roster || !roster.length) return;
+    const unresolved = roster.filter(p => p.DisplayName === String(p.UserID)).map(p => p.UserID);
+    if (!unresolved.length) return;
+    const resolved = await resolveUsernames([...new Set(unresolved)]);
+    let changed = 0;
+    for (const p of roster) {
+        if (p.DisplayName === String(p.UserID)) {
+            const name = resolved[p.UserID] || resolved[String(p.UserID)];
+            if (name) { p.DisplayName = name; changed++; }
+        }
+    }
+    if (changed && ui.currentClanName === clanName) renderClanDetail();
 }
 
 function renderLeaderboard() {
@@ -208,11 +220,16 @@ function renderClanDetail() {
 
     const tbody = document.getElementById('roster-tbody');
     const roster = detail.roster || [];
+    const snapClan = latestSnapshot() ? findClanInSnapshot(latestSnapshot(), detail.Name) : null;
+    const snapRoster = snapClan?.roster || [];
+    const snapPointsById = {};
+    snapRoster.forEach(sp => { snapPointsById[sp.UserID] = sp.Points; });
     tbody.innerHTML = roster.length
         ? roster.map((p, idx) => {
-            const d10 = playerDelta(detail, p.UserID, p.Points, 10 * 60_000, 11 * 60_000);
-            const d30 = playerDelta(detail, p.UserID, p.Points, 30 * 60_000, 8  * 60_000);
-            const d1h = playerDelta(detail, p.UserID, p.Points, 60 * 60_000, 12 * 60_000);
+            const pts = snapPointsById[p.UserID] !== undefined ? snapPointsById[p.UserID] : p.Points;
+            const d10 = playerDelta(detail, p.UserID, pts, 10 * 60_000, 11 * 60_000);
+            const d30 = playerDelta(detail, p.UserID, pts, 30 * 60_000, 8  * 60_000);
+            const d1h = playerDelta(detail, p.UserID, pts, 60 * 60_000, 12 * 60_000);
             return `
               <tr>
                 <td class="player-rank">${idx + 1}</td>
@@ -243,8 +260,26 @@ async function apiFetch(url) {
 }
 
 async function loadHistory() {
-    const res = await fetch(`history.json?t=${Date.now()}`, { signal: AbortSignal.timeout(30000) });
-    if (res.ok) historyData = await res.json();
+    const [histRes, namesRes] = await Promise.all([
+        fetch(`history.json?t=${Date.now()}`, { signal: AbortSignal.timeout(30000) }),
+        fetch(`resolved_names.json?t=${Date.now()}`, { signal: AbortSignal.timeout(10000) }).catch(() => null),
+    ]);
+    if (namesRes && namesRes.ok) {
+        try { resolvedNamesCache = await namesRes.json(); } catch (_) {}
+    }
+    if (histRes.ok) {
+        historyData = await histRes.json();
+        for (const snap of historyData) {
+            for (const clan of (snap.clans || [])) {
+                for (const p of (clan.roster || [])) {
+                    if (p.DisplayName === String(p.UserID)) {
+                        const cached = resolvedNamesCache[p.UserID] || resolvedNamesCache[String(p.UserID)];
+                        if (cached) p.DisplayName = cached;
+                    }
+                }
+            }
+        }
+    }
 }
 
 function hasRosterData(entry) {
@@ -293,8 +328,10 @@ function renderDeltaStat(elId, detail, windowMs, toleranceMs) {
     }
 
     const latest = latestSnapshot();
+    const latestClan = latest ? findClanInSnapshot(latest, detail.Name) : null;
+    const currentPoints = latestClan ? latestClan.Points : detail.Points;
     const ageMin = Math.round((latest.ts - snap.ts) / 60000);
-    const delta  = detail.Points - entry.Points;
+    const delta  = currentPoints - entry.Points;
     const sign   = delta >= 0 ? '+' : '−';
     el.textContent = `${sign}${fmt(Math.abs(delta))}`;
     el.title       = `From snapshot ${ageMin}m ago`;
@@ -406,38 +443,49 @@ function clearSearch() {
 async function resolveUsernames(userIds) {
     if (!userIds.length) return {};
     const map = {};
-    const ROBLOX_URL = 'https://users.roblox.com/v1/users';
 
     for (let i = 0; i < userIds.length; i += 100) {
         const batch = userIds.slice(i, i + 100).map(Number).filter(id => id > 0);
         if (!batch.length) continue;
-
-        const body    = JSON.stringify({ userIds: batch, excludeBannedUsers: false });
+        const body = JSON.stringify({ userIds: batch, excludeBannedUsers: false });
         const headers = { 'Content-Type': 'application/json' };
         let parsed = null;
-
         try {
-            const res = await fetch(ROBLOX_URL, { method: 'POST', headers, body, signal: AbortSignal.timeout(8000) });
+            const res = await fetch('https://users.roproxy.com/v1/users', { method: 'POST', headers, body, signal: AbortSignal.timeout(10000) });
             if (res.ok) parsed = await res.json();
         } catch (_) {}
-        for (const proxy of CORS_PROXIES) {
-            if (parsed) break;
-            try {
-                const res = await fetch(`${proxy}${encodeURIComponent(ROBLOX_URL)}`, {
-                    method: 'POST', headers, body, signal: AbortSignal.timeout(12000),
-                });
-                if (res.ok) parsed = await res.json();
-            } catch (_) {}
-        }
-
-        if (parsed) {
-            (parsed.data || []).forEach(u => {
-                const display = u.displayName || u.name;
-                map[u.id] = display;
-                map[String(u.id)] = display;
+        if (parsed && parsed.data && parsed.data.length) {
+            parsed.data.forEach(u => {
+                const n = u.displayName || u.name;
+                map[u.id] = n; map[String(u.id)] = n;
             });
         }
     }
+
+    if (Object.keys(map).length > 0) return map;
+
+    const remaining = userIds.map(Number).filter(id => id > 0 && !map[id]).slice(0, 200);
+    if (!remaining.length) return map;
+    let idx = 0;
+    async function worker() {
+        while (idx < remaining.length) {
+            const uid = remaining[idx++];
+            for (const makeFn of [
+                u => ({ url: `https://api.allorigins.win/get?url=${encodeURIComponent(`https://users.roblox.com/v1/users/${u}`)}`, wrap: true }),
+                u => ({ url: `https://corsproxy.io/?url=${encodeURIComponent(`https://users.roblox.com/v1/users/${u}`)}`, wrap: false }),
+            ]) {
+                try {
+                    const { url, wrap } = makeFn(uid);
+                    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+                    if (!res.ok) continue;
+                    const data = wrap ? JSON.parse((await res.json()).contents) : await res.json();
+                    const n = data.displayName || data.name;
+                    if (n) { map[uid] = n; map[String(uid)] = n; break; }
+                } catch (_) {}
+            }
+        }
+    }
+    await Promise.all(Array.from({ length: Math.min(10, remaining.length) }, () => worker()));
     return map;
 }
 
@@ -445,14 +493,8 @@ function isUnresolvedName(entity) {
     return !!(entity && entity.UserID && entity.DisplayName === String(entity.UserID));
 }
 
-let resolvedNamesCachePromise = null;
 function getResolvedNamesCache() {
-    if (!resolvedNamesCachePromise) {
-        resolvedNamesCachePromise = fetch(`resolved_names.json?t=${Date.now()}`)
-            .then(res => (res.ok ? res.json() : {}))
-            .catch(() => ({}));
-    }
-    return resolvedNamesCachePromise;
+    return Promise.resolve(resolvedNamesCache);
 }
 
 function firstDefined(...args) {
