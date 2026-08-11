@@ -1,8 +1,6 @@
 name: Snapshot Clan Battle Data
 
 on:
-  schedule:
-    - cron: '0,10,20,30,40,50 * * * *'
   workflow_dispatch:
 
 permissions:
