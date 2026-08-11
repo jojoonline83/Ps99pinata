@@ -10,34 +10,14 @@ permissions:
 jobs:
   snapshot:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 15
     steps:
       - name: Checkout gh-pages
         uses: actions/checkout@v4
         with:
           ref: gh-pages
 
-      - name: Skip if an older run is still in progress
-        id: guard
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          other_ids=$(gh run list --repo "${{ github.repository }}" --workflow snapshot.yml --status in_progress --json databaseId --jq '.[].databaseId' | grep -v "^${{ github.run_id }}$" || true)
-          proceed=true
-          for id in $other_ids; do
-            if [ "$id" -lt "${{ github.run_id }}" ]; then
-              proceed=false
-            fi
-          done
-          if [ "$proceed" = "true" ]; then
-            echo "proceed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "An older snapshot run is still in progress — skipping this dispatch."
-            echo "proceed=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Record and push snapshot (retries on conflict)
-        if: steps.guard.outputs.proceed == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -54,3 +34,11 @@ jobs:
           done
           echo "::error::Failed to push snapshot after 5 attempts"
           exit 1
+
+      - name: Wait 9 minutes then re-trigger
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sleep 540
+          gh workflow run snapshot.yml --repo "${{ github.repository }}" --ref main
