@@ -169,22 +169,15 @@ function renderLeaderboard() {
         return;
     }
 
-    const globalList = allPlayers();
     tbody.innerHTML = list.map((p, idx) => {
         const color = colorFor(p.UserID);
         const d10 = playerDelta(p.UserID, p.Points, 10 * 60_000, 11 * 60_000);
         const d30 = playerDelta(p.UserID, p.Points, 30 * 60_000, 8  * 60_000);
         const d1h = playerDelta(p.UserID, p.Points, 60 * 60_000, 12 * 60_000);
-        const globalRank = state.mode === 'search' ? globalList.findIndex(g => g.UserID === p.UserID) + 1 : idx + 1;
-        const rankLabel = globalRank > 0 ? globalRank : '—';
-        const isResolved = p.DisplayName !== String(p.UserID);
-        const nameHtml = isResolved
-            ? `<div>${esc(p.DisplayName)}</div><div style="font-size:10px;color:var(--text-muted);font-weight:400">ID: ${p.UserID}</div>`
-            : `<div style="color:var(--text-muted)">${p.UserID}</div>`;
         return `
       <tr onclick="showPlayerDetail(${p.UserID})" style="cursor:pointer">
-        <td class="player-rank">${rankLabel}</td>
-        <td class="player-name"><span class="st-team-dot" style="background:${color}"></span> <div>${nameHtml}</div></td>
+        <td class="player-rank">${idx + 1}</td>
+        <td class="player-name"><span class="st-team-dot" style="background:${color}"></span> ${esc(p.DisplayName)}</td>
         <td style="font-size:12px;color:var(--text-secondary)">${esc(p.Clan || '—')}</td>
         <td class="player-points" style="color:${color}">${fmt(p.Points)}</td>
         <td style="color:${d10.color};font-size:12px">${d10.text}</td>
@@ -206,16 +199,10 @@ function renderPlayerDetail(userId) {
     const color = colorFor(userId);
     const rank = players.indexOf(player) + 1;
 
-    const clanMembers = player.Clan
-        ? players.filter(p => p.Clan === player.Clan).sort((a, b) => b.Points - a.Points)
-        : [];
-    const clanRank = clanMembers.findIndex(p => p.UserID === userId) + 1;
-
     document.getElementById('player-detail-color-bar').style.background = color;
     document.getElementById('player-detail-name').textContent = player.DisplayName;
     document.getElementById('player-detail-sub').textContent = `User ID: ${player.UserID}`;
     document.getElementById('pd-rank').textContent = `#${fmt(rank)}`;
-    document.getElementById('pd-clan-rank').textContent = clanRank > 0 ? `#${clanRank} / ${clanMembers.length}` : '—';
     document.getElementById('pd-pts').textContent = fmt(player.Points);
     document.getElementById('pd-clan').textContent = player.Clan || '—';
 
@@ -289,27 +276,6 @@ async function searchPlayers() {
 
     if (localMatches.length) {
         setStatus(`Found ${localMatches.length} player(s).`, 'success');
-        const unresolved = localMatches.filter(p => p.DisplayName === String(p.UserID)).map(p => p.UserID);
-        if (unresolved.length) {
-            setStatus(`Found ${localMatches.length} player(s). Resolving ${unresolved.length} name(s)…`, 'loading');
-            const resolved = await resolveUsernamesBrowser(unresolved);
-            const count = Object.keys(resolved).length;
-            if (count) {
-                for (const p of localMatches) {
-                    if (p.DisplayName === String(p.UserID) && (resolved[p.UserID] || resolved[String(p.UserID)])) {
-                        p.DisplayName = resolved[p.UserID] || resolved[String(p.UserID)];
-                    }
-                }
-                for (const snap of playerSnapshots) {
-                    for (const [, sp] of snap.players.byId) {
-                        if (sp.DisplayName === String(sp.UserID) && resolved[sp.UserID]) sp.DisplayName = resolved[sp.UserID];
-                    }
-                    snap.players.list = [...snap.players.byId.values()].sort((a, b) => b.Points - a.Points);
-                }
-                renderLeaderboard();
-            }
-            setStatus(`Found ${localMatches.length} player(s). Resolved ${count} name(s).`, 'success');
-        }
     } else {
         setStatus(`No players found matching "${esc(query)}".`, 'error');
     }
@@ -319,7 +285,123 @@ async function searchPlayers() {
 function clearSearch() {
     document.getElementById('search-player-name').value = '';
     document.getElementById('search-status').innerHTML = '';
+    document.getElementById('clan-search-status').innerHTML = '';
     if (state.mode === 'search') { state.mode = 'top'; save(); renderLeaderboard(); }
+}
+
+function firstDefined(...args) {
+    for (const a of args) if (a !== undefined && a !== null) return a;
+    return undefined;
+}
+function asNumber(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; }
+
+async function searchByClan() {
+    const input = document.getElementById('search-clan-name');
+    const query = (input?.value || '').trim();
+    if (!query) { toast('Enter a clan name', 'error'); return; }
+
+    const btn = document.getElementById('search-clan-btn');
+    const setStatus = (msg, type = '') => {
+        const el = document.getElementById('clan-search-status');
+        el.className = `import-status ${type}`;
+        el.innerHTML = type === 'loading' ? `<span class="spinner"></span>${msg}` : msg;
+    };
+
+    btn.disabled = true;
+    setStatus(`Fetching clan "${esc(query)}" from API…`, 'loading');
+
+    try {
+        const API_BASE = 'https://ps99.biggamesapi.io/api';
+        let json = null;
+        try {
+            const res = await fetch(`${API_BASE}/clan/${encodeURIComponent(query)}`, { signal: AbortSignal.timeout(10000) });
+            if (res.ok) json = await res.json();
+        } catch (_) {}
+        if (!json || json.status !== 'ok') {
+            for (const proxy of CORS_PROXIES) {
+                try {
+                    const res = await fetch(`${proxy}${encodeURIComponent(`${API_BASE}/clan/${encodeURIComponent(query)}`)}`, { signal: AbortSignal.timeout(15000) });
+                    if (res.ok) { json = await res.json(); if (json?.status === 'ok') break; }
+                } catch (_) {}
+            }
+        }
+        if (!json || json.status !== 'ok' || !json.data) throw new Error('Clan not found');
+
+        const raw = json.data;
+        const members = Array.isArray(raw.Members) ? raw.Members : [];
+        const battles = raw.Battles || raw.battles || {};
+        const battleKeys = Object.keys(battles);
+        let battleData = battleKeys.length ? battles[battleKeys[battleKeys.length - 1]] : null;
+
+        let contribRows = [];
+        if (battleData) {
+            contribRows = firstDefined(
+                battleData.PointContributions, battleData.pointContributions,
+                battleData.Contributions, battleData.contributions,
+                battleData.Contribution, battleData.contribution
+            ) || [];
+            if (!Array.isArray(contribRows)) contribRows = [];
+        }
+        if (!contribRows.length) {
+            const fb = firstDefined(
+                raw.Contribution?.Battle, raw.contribution?.battle,
+                raw.Contributions?.Battle, raw.contributions?.battle
+            );
+            if (Array.isArray(fb)) contribRows = fb;
+        }
+
+        const contribByUser = {};
+        for (const c of contribRows) {
+            const uid = asNumber(firstDefined(c.UserID, c.UserId, c.user_id, c.userId, c.id));
+            const pts = asNumber(firstDefined(c.Points, c.points, c.TotalPoints, c.total_points, c.Score, c.score, c.Value, c.value));
+            if (uid > 0) contribByUser[uid] = pts;
+        }
+
+        const roster = [];
+        const seen = new Set();
+        for (const m of members) {
+            const uid = asNumber(firstDefined(m.UserID, m.UserId, m.user_id, m.userId, m.id));
+            if (uid <= 0) continue;
+            seen.add(uid);
+            roster.push({ UserID: uid, DisplayName: String(uid), Points: contribByUser[uid] ?? 0 });
+        }
+        for (const [uidStr, pts] of Object.entries(contribByUser)) {
+            const uid = Number(uidStr);
+            if (!seen.has(uid) && uid > 0) roster.push({ UserID: uid, DisplayName: String(uid), Points: pts });
+        }
+
+        roster.sort((a, b) => b.Points - a.Points);
+
+        setStatus(`Resolving ${roster.length} player names…`, 'loading');
+        const needIds = roster.filter(p => {
+            const cached = resolvedNamesCache[p.UserID] || resolvedNamesCache[String(p.UserID)];
+            if (cached) { p.DisplayName = cached; return false; }
+            return true;
+        }).map(p => p.UserID);
+
+        if (needIds.length) {
+            const resolved = await resolveUsernamesBrowser(needIds);
+            roster.forEach(p => {
+                if (p.DisplayName === String(p.UserID) && resolved[p.UserID]) p.DisplayName = resolved[p.UserID];
+            });
+        }
+
+        const clanName = raw.Name || raw.name || query;
+        state.searchResults = roster.map(p => ({
+            UserID: p.UserID,
+            DisplayName: p.DisplayName,
+            Points: p.Points,
+            Clan: clanName,
+        }));
+        state.mode = 'search';
+        save();
+        renderLeaderboard();
+        setStatus(`Found ${roster.length} player(s) in clan "${esc(clanName)}".`, 'success');
+    } catch (err) {
+        setStatus(`Clan "${esc(query)}" not found — check the exact name.`, 'error');
+    } finally {
+        btn.disabled = false;
+    }
 }
 
 const CORS_PROXIES = [
@@ -329,8 +411,7 @@ const CORS_PROXIES = [
 
 async function resolveUsernamesBrowser(userIds) {
     const map = {};
-    if (!userIds.length) return map;
-
+    const ROBLOX_URL = 'https://users.roblox.com/v1/users';
     for (let i = 0; i < userIds.length; i += 100) {
         const batch = userIds.slice(i, i + 100).map(Number).filter(id => id > 0);
         if (!batch.length) continue;
@@ -338,53 +419,33 @@ async function resolveUsernamesBrowser(userIds) {
         const headers = { 'Content-Type': 'application/json' };
         let parsed = null;
         try {
-            const res = await fetch('https://users.roproxy.com/v1/users', { method: 'POST', headers, body, signal: AbortSignal.timeout(10000) });
+            const res = await fetch(ROBLOX_URL, { method: 'POST', headers, body, signal: AbortSignal.timeout(8000) });
             if (res.ok) parsed = await res.json();
         } catch (_) {}
-        if (parsed && parsed.data && parsed.data.length) {
-            parsed.data.forEach(u => {
-                const n = u.displayName || u.name;
-                map[u.id] = n;
-                resolvedNamesCache[u.id] = n;
-                resolvedNamesCache[String(u.id)] = n;
-            });
-        }
-    }
-
-    if (Object.keys(map).length > 0) return map;
-
-    const remaining = userIds.map(Number).filter(id => id > 0 && !map[id]).slice(0, 200);
-    if (!remaining.length) return map;
-    let idx = 0;
-    async function worker() {
-        while (idx < remaining.length) {
-            const uid = remaining[idx++];
-            for (const makeFn of [
-                u => ({ url: `https://api.allorigins.win/get?url=${encodeURIComponent(`https://users.roblox.com/v1/users/${u}`)}`, wrap: true }),
-                u => ({ url: `https://corsproxy.io/?url=${encodeURIComponent(`https://users.roblox.com/v1/users/${u}`)}`, wrap: false }),
-            ]) {
+        if (!parsed) {
+            for (const proxy of CORS_PROXIES) {
                 try {
-                    const { url, wrap } = makeFn(uid);
-                    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
-                    if (!res.ok) continue;
-                    const data = wrap ? JSON.parse((await res.json()).contents) : await res.json();
-                    const n = data.displayName || data.name;
-                    if (n) {
-                        map[uid] = n;
-                        resolvedNamesCache[uid] = n;
-                        resolvedNamesCache[String(uid)] = n;
-                        break;
-                    }
+                    const res = await fetch(`${proxy}${encodeURIComponent(ROBLOX_URL)}`, {
+                        method: 'POST', headers, body, signal: AbortSignal.timeout(12000),
+                    });
+                    if (res.ok) { parsed = await res.json(); break; }
                 } catch (_) {}
             }
         }
+        if (parsed) {
+            (parsed.data || []).forEach(u => {
+                const name = u.displayName || u.name;
+                map[u.id] = name;
+                resolvedNamesCache[u.id] = name;
+                resolvedNamesCache[String(u.id)] = name;
+            });
+        }
     }
-    await Promise.all(Array.from({ length: Math.min(10, remaining.length) }, () => worker()));
     return map;
 }
 
 async function resolveUnresolvedPlayers() {
-    const players = topPlayers();
+    const players = allPlayers();
     const unresolved = players.filter(p => p.DisplayName === String(p.UserID)).map(p => p.UserID);
     if (!unresolved.length) return;
     console.log(`Resolving ${unresolved.length} player names via Roblox API…`);
@@ -443,6 +504,11 @@ document.getElementById('clear-search-btn').addEventListener('click', clearSearc
 document.getElementById('search-player-name').addEventListener('keydown', e => {
     if (e.key === 'Enter') { e.preventDefault(); searchPlayers(); }
 });
+document.getElementById('search-clan-btn').addEventListener('click', searchByClan);
+document.getElementById('search-clan-name').addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); searchByClan(); }
+});
+
 setInterval(() => refreshAll({ silent: true }), 10 * 60_000);
 
 load();
