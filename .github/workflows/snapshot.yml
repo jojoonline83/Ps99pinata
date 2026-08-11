@@ -7,12 +7,12 @@ on:
 
 permissions:
   contents: write
-  actions: write
+  actions: read
 
 jobs:
   snapshot:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 8
     steps:
       - name: Checkout gh-pages
         uses: actions/checkout@v4
@@ -53,16 +53,3 @@ jobs:
           done
           echo "::error::Failed to push snapshot after 5 attempts"
           exit 1
-
-      - name: Wait 9 minutes then re-trigger
-        if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          sleep 540
-          for attempt in 1 2 3; do
-            gh workflow run snapshot.yml --repo "${{ github.repository }}" --ref main && exit 0
-            echo "Dispatch attempt $attempt failed, retrying in 10s…"
-            sleep 10
-          done
-          echo "::warning::Self-dispatch failed after 3 attempts"
