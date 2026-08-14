@@ -22,6 +22,13 @@ async function fetchJson(url, attempts = 2) {
     return null;
 }
 
+const battleJson = await fetchJson(`${API_BASE}/activeClanBattle`);
+const battleData = battleJson?.data?.configData;
+if (!battleData || Date.now() / 1000 > battleData.FinishTime) {
+    console.log('No active clan battle — skipping snapshot.');
+    process.exit(0);
+}
+
 async function mapWithConcurrency(items, limit, fn) {
     const results = new Array(items.length);
     let idx = 0;
