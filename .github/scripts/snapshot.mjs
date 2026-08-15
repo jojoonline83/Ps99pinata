@@ -111,8 +111,9 @@ function buildClanFromDetail(detail, summary) {
     };
 }
 
-async function resolveUsernames(userIds, deadlineMs = 60_000) {
+async function resolveUsernames(userIds, deadlineMs = 240_000) {
     const map = {};
+    const sent = new Set();
     const ROBLOX_URL = 'https://users.roblox.com/v1/users';
     const deadline = Date.now() + deadlineMs;
     const batches = [];
@@ -124,38 +125,42 @@ async function resolveUsernames(userIds, deadlineMs = 60_000) {
     let skipped = 0;
     async function resolveBatch(batch) {
         if (Date.now() > deadline) { skipped++; return false; }
-        for (let attempt = 1; attempt <= 3; attempt++) {
+        for (let attempt = 1; attempt <= 2; attempt++) {
             if (Date.now() > deadline) { skipped++; return false; }
             try {
                 const res = await fetch(ROBLOX_URL, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ userIds: batch, excludeBannedUsers: false }),
-                    signal: AbortSignal.timeout(6000),
+                    signal: AbortSignal.timeout(8000),
                 });
                 if (res.ok) {
                     const json = await res.json();
                     const data = json.data || [];
-                    if (data.length > 0) {
-                        data.forEach(u => { map[u.id] = u.displayName || u.name; });
-                        return true;
-                    }
-                    await new Promise(r => setTimeout(r, 300 * attempt));
+                    batch.forEach(uid => sent.add(uid));
+                    data.forEach(u => { map[u.id] = u.displayName || u.name; });
+                    return true;
                 } else if (res.status === 429) {
                     const retryAfter = Number(res.headers.get('retry-after')) || 0;
-                    await new Promise(r => setTimeout(r, Math.max(retryAfter * 1000, 500 * attempt)));
+                    await new Promise(r => setTimeout(r, Math.max(retryAfter * 1000, 800 * attempt)));
                 } else {
-                    await new Promise(r => setTimeout(r, 200 * attempt));
+                    await new Promise(r => setTimeout(r, 300 * attempt));
                 }
             } catch (_) {
-                await new Promise(r => setTimeout(r, 300 * attempt));
+                await new Promise(r => setTimeout(r, 500 * attempt));
             }
         }
         return false;
     }
 
-    await mapWithConcurrency(batches, 10, resolveBatch);
+    await mapWithConcurrency(batches, 5, resolveBatch);
     if (skipped) console.log(`resolveUsernames: ${skipped} batch(es) skipped (deadline).`);
+
+    let unresolvable = 0;
+    for (const uid of sent) {
+        if (!map[uid]) { map[uid] = String(uid); unresolvable++; }
+    }
+    if (unresolvable) console.log(`  ${unresolvable} user(s) marked unresolvable (Roblox returned no data).`);
     return map;
 }
 
@@ -284,20 +289,25 @@ function findSnapNear(hist, latest, msAgo, tolMs) {
     return best && bestDiff <= tolMs ? best : null;
 }
 
-async function sendDiscord(msg) {
+function fmtNum(n) {
+    return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
+async function sendDiscordEmbed(embed) {
     try {
         const res = await fetch(DISCORD_WEBHOOK, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                content: msg,
+                content: `<@&${DISCORD_ROLE_ID}>`,
+                embeds: [embed],
                 allowed_mentions: { roles: [DISCORD_ROLE_ID] },
             }),
             signal: AbortSignal.timeout(10000),
         });
-        console.log(`Discord alert sent (${res.status}): ${msg}`);
+        console.log(`Discord embed sent (${res.status}): ${embed.title}`);
     } catch (e) {
-        console.log(`Discord alert failed: ${e.message}`);
+        console.log(`Discord embed failed: ${e.message}`);
     }
 }
 
@@ -330,7 +340,7 @@ if (history.length >= 2) {
             if (delta === 0) {
                 if (!alertState[nameLower][key]) {
                     alertState[nameLower][key] = true;
-                    alerts.push({ name: current.DisplayName, window: w.label });
+                    alerts.push({ name: current.DisplayName, window: w.label, points: current.Points, clan: current.Clan });
                 }
             } else {
                 alertState[nameLower][key] = false;
@@ -339,14 +349,28 @@ if (history.length >= 2) {
     }
 
     if (alerts.length) {
-        const grouped = {};
+        const byPlayer = {};
         for (const a of alerts) {
-            if (!grouped[a.window]) grouped[a.window] = [];
-            grouped[a.window].push(a.name);
+            if (!byPlayer[a.name]) byPlayer[a.name] = { name: a.name, points: a.points, clan: a.clan, windows: [] };
+            byPlayer[a.name].windows.push(a.window);
         }
-        for (const [window, names] of Object.entries(grouped)) {
-            const msg = `<@&${DISCORD_ROLE_ID}> ${names.join(' and ')} dc for ${window} (0 point gain)`;
-            await sendDiscord(msg);
+        const pad = n => String(n).padStart(2, '0');
+        const d = new Date();
+        const dateStr = `${pad(d.getUTCDate())}/${pad(d.getUTCMonth() + 1)}/${d.getUTCFullYear()}`;
+        const timeStr = `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+        for (const player of Object.values(byPlayer)) {
+            const embed = {
+                title: `⚠️ ${player.name} — No Point Gain`,
+                description: `**${player.name}** has **0 points gained** in the last **${player.windows[0]}**.`,
+                color: 0xFF8C00,
+                fields: [
+                    { name: 'Current Points', value: fmtNum(player.points), inline: true },
+                    { name: 'League', value: player.clan || 'Unknown', inline: true },
+                    { name: 'Zero-gain Windows', value: player.windows.join(', '), inline: false },
+                ],
+                footer: { text: `PS99 Clan Battle Tracker | ${dateStr} ${timeStr}` },
+            };
+            await sendDiscordEmbed(embed);
         }
     }
 
