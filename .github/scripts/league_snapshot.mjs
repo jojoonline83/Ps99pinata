@@ -4,6 +4,7 @@ const API_BASE            = 'https://ps99.biggamesapi.io/v1';
 const LEAGUE_DIR          = 'league';
 const HISTORY_FILE        = `${LEAGUE_DIR}/history.json`;
 const RESOLVED_CACHE_FILE = `${LEAGUE_DIR}/resolved_names.json`;
+const ALERT_STATE_FILE    = `${LEAGUE_DIR}/alert_state.json`;
 const RETENTION_MS        = 95 * 60 * 1000;
 const TOP_PAGES           = 5;
 const PAGE_SIZE           = 100;
@@ -252,3 +253,124 @@ history = history.filter(entry => now - entry.ts <= RETENTION_MS);
 writeFileSync(HISTORY_FILE, JSON.stringify(history));
 const elapsedSec = ((Date.now() - startedAt) / 1000).toFixed(1);
 console.log(`Snapshot recorded: ${leagues.length} leagues with roster detail in ${elapsedSec}s, ${history.length} snapshots retained.`);
+
+/* ── DC alerts (Discord) ────────────────────────────────────────── */
+
+const DISCORD_WEBHOOK = 'https://discord.com/api/webhooks/1499732518692196485/U2pJIrJIPPjIVLTn2VlGtvuGlAaChRLiYqEFXe3AZj0l-YHRTebD16x4mn-WxDn9MXc1';
+const DISCORD_ROLE_ID = '967089828837597264';
+const WATCH_PLAYERS = ['jojo8', 'javierplayz'];
+const DC_WINDOWS = [
+    { label: '10m', ms: 10 * 60_000, tol: 11 * 60_000 },
+    { label: '30m', ms: 30 * 60_000, tol: 8  * 60_000 },
+    { label: '60m', ms: 60 * 60_000, tol: 12 * 60_000 },
+];
+
+function findPlayerInSnapshot(snap, nameLower) {
+    for (const l of snap.leagues || []) {
+        for (const p of l.roster || []) {
+            if (String(p.DisplayName).toLowerCase() === nameLower) return { ...p, League: l.Name };
+        }
+    }
+    return null;
+}
+
+function findSnapNear(hist, latest, msAgo, tolMs) {
+    const target = latest.ts - msAgo;
+    const minAge = msAgo / 2;
+    let best = null, bestDiff = Infinity;
+    for (const s of hist) {
+        if (s === latest) continue;
+        if (latest.ts - s.ts < minAge) continue;
+        const d = Math.abs(s.ts - target);
+        if (d < bestDiff) { bestDiff = d; best = s; }
+    }
+    return best && bestDiff <= tolMs ? best : null;
+}
+
+function fmtNum(n) {
+    return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
+async function sendDiscordEmbed(embed) {
+    try {
+        const res = await fetch(DISCORD_WEBHOOK, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                content: `<@&${DISCORD_ROLE_ID}>`,
+                embeds: [embed],
+                allowed_mentions: { roles: [DISCORD_ROLE_ID] },
+            }),
+            signal: AbortSignal.timeout(10000),
+        });
+        console.log(`Discord embed sent (${res.status}): ${embed.title}`);
+    } catch (e) {
+        console.log(`Discord embed failed: ${e.message}`);
+    }
+}
+
+if (history.length >= 2) {
+    let alertState = {};
+    if (existsSync(ALERT_STATE_FILE)) {
+        try { alertState = JSON.parse(readFileSync(ALERT_STATE_FILE, 'utf8')); } catch (_) { alertState = {}; }
+    }
+
+    const latest = history[history.length - 1];
+    const alerts = [];
+
+    for (const name of WATCH_PLAYERS) {
+        const nameLower = name.toLowerCase();
+        const current = findPlayerInSnapshot(latest, nameLower);
+        if (!current) continue;
+
+        if (!alertState[nameLower]) alertState[nameLower] = {};
+
+        for (const w of DC_WINDOWS) {
+            const pastSnap = findSnapNear(history, latest, w.ms, w.tol);
+            if (!pastSnap) continue;
+
+            const past = findPlayerInSnapshot(pastSnap, nameLower);
+            if (!past) continue;
+
+            const delta = current.Points - past.Points;
+            const key = w.label;
+
+            if (delta === 0) {
+                if (!alertState[nameLower][key]) {
+                    alertState[nameLower][key] = true;
+                    alerts.push({ name: current.DisplayName, window: w.label, points: current.Points, league: current.League });
+                }
+            } else {
+                alertState[nameLower][key] = false;
+            }
+        }
+    }
+
+    if (alerts.length) {
+        const byPlayer = {};
+        for (const a of alerts) {
+            if (!byPlayer[a.name]) byPlayer[a.name] = { name: a.name, points: a.points, league: a.league, windows: [] };
+            byPlayer[a.name].windows.push(a.window);
+        }
+        const pad = n => String(n).padStart(2, '0');
+        const d = new Date();
+        const dateStr = `${pad(d.getUTCDate())}/${pad(d.getUTCMonth() + 1)}/${d.getUTCFullYear()}`;
+        const timeStr = `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+        for (const player of Object.values(byPlayer)) {
+            const embed = {
+                title: `⚠️ ${player.name} — No Point Gain`,
+                description: `**${player.name}** has **0 points gained** in the last **${player.windows[0]}**.`,
+                color: 0xFF8C00,
+                fields: [
+                    { name: 'Current Points', value: fmtNum(player.points), inline: true },
+                    { name: 'League', value: player.league || 'Unknown', inline: true },
+                    { name: 'Zero-gain Windows', value: player.windows.join(', '), inline: false },
+                ],
+                footer: { text: `PS99 League Tracker | ${dateStr} ${timeStr} UTC` },
+            };
+            await sendDiscordEmbed(embed);
+        }
+    }
+
+    writeFileSync(ALERT_STATE_FILE, JSON.stringify(alertState));
+}
