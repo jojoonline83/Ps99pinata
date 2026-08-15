@@ -15,7 +15,11 @@ async function fetchJson(url, attempts = 2) {
     for (let i = 0; i < attempts; i++) {
         try {
             const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
-            if (res.ok) return await res.json();
+            if (res.ok) {
+                const json = await res.json();
+                if (json.status === 'ok' && json.data !== undefined) return json.data;
+                return json;
+            }
         } catch (_) {}
         if (i < attempts - 1) await new Promise(r => setTimeout(r, 300));
     }
@@ -57,9 +61,9 @@ const pageResults = await Promise.all(
 const summaries = [];
 for (const [idx, json] of pageResults.entries()) {
     if (!json) { console.log(`  page ${idx + 1}: no response`); continue; }
-    const leagues = json.leagues ?? json.data;
+    const leagues = json.leagues ?? json.data?.leagues ?? json.data;
     if (!Array.isArray(leagues) || !leagues.length) {
-        console.log(`  page ${idx + 1}: no leagues array (keys: ${Object.keys(json).join(', ')})`);
+        console.log(`  page ${idx + 1}: no leagues array (keys: ${Object.keys(json).join(', ')}, data type: ${typeof json.data}, data keys: ${json.data && typeof json.data === 'object' ? Object.keys(json.data).join(',') : 'n/a'})`);
         continue;
     }
     for (const raw of leagues) {
