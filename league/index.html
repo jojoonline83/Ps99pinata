@@ -6,12 +6,12 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <title>PS99 Clan Battle — Pinata</title>
-    <link rel="stylesheet" href="style.css?v=1">
+    <title>PS99 League Leaderboard</title>
+    <link rel="stylesheet" href="../style.css?v=1">
     <script>
     (function(){
         var V = 1;
-        var k = '_ps99cb_pinata_v';
+        var k = '_ps99league_v';
         var stored = localStorage.getItem(k);
         localStorage.setItem(k, V);
         if (stored && stored !== String(V)) {
@@ -26,8 +26,8 @@
 <header>
     <div class="header-content">
         <div class="logo">
-            <span class="logo-icon">&#127882;</span>
-            <h1>PS99 Clan Battle &#8212; Pinata</h1>
+            <span class="logo-icon">&#127942;</span>
+            <h1>PS99 League Leaderboard</h1>
         </div>
         <div style="display:flex;align-items:center;gap:10px">
             <span id="event-status-badge"></span>
@@ -37,9 +37,8 @@
 </header>
 
 <nav class="page-nav">
-    <a href="index.html" class="nav-tab active">Clan Leaderboard</a>
-    <a href="players.html" class="nav-tab">Individual Players</a>
-    <a href="league/index.html" class="nav-tab">League</a>
+    <a href="index.html" class="nav-tab active">League Leaderboard</a>
+    <a href="../index.html" class="nav-tab">Clan Battle</a>
 </nav>
 
 <main>
@@ -48,37 +47,37 @@
     <div id="leaderboard-view" class="view active">
         <div class="event-info-bar">
             <div>
-                <div class="event-title">Clan Battle Leaderboard</div>
-                <div class="event-dates" id="event-dates">Top 500 clans, refreshed every ~10 minutes in the background</div>
+                <div class="event-title">League Leaderboard</div>
+                <div class="event-dates" id="event-dates">Top leagues, refreshed every ~10 minutes in the background</div>
             </div>
         </div>
 
         <div class="manage-card live-card">
             <div class="manage-card-header">
-                <h3>&#128269; Search Clans</h3>
+                <h3>&#128269; Search Leagues</h3>
                 <span class="live-dot"></span>
             </div>
-            <p class="live-desc">Search any clan by name, even if it's not in the Top 500.</p>
+            <p class="live-desc">Search any league by name, even if it's not in the leaderboard.</p>
             <div class="live-manual">
-                <input type="text" id="search-clan-name" class="live-input" placeholder="Enter clan name">
+                <input type="text" id="search-clan-name" class="live-input" placeholder="Enter league name">
                 <button class="btn-live-secondary" id="search-clan-btn">Search</button>
                 <button class="btn-secondary" id="clear-search-btn" style="display:none">Clear</button>
             </div>
             <div id="search-status" class="import-status"></div>
         </div>
 
-        <h3 class="sub-heading" id="leaderboard-heading">Top 500</h3>
+        <h3 class="sub-heading" id="leaderboard-heading">Top Leagues</h3>
         <div class="players-table-container">
             <table class="players-table">
                 <thead>
-                    <tr><th>#</th><th>Clan</th><th>Members</th><th>Points</th></tr>
+                    <tr><th>#</th><th>League</th><th>Level</th><th>Members</th><th>Points</th></tr>
                 </thead>
                 <tbody id="leaderboard-tbody"></tbody>
             </table>
         </div>
     </div>
 
-    <!-- Clan Detail -->
+    <!-- League Detail -->
     <div id="clan-detail-view" class="view">
         <div class="detail-top-bar">
             <button class="back-btn" id="clan-back-btn">&larr; Back to Leaderboard</button>
@@ -94,6 +93,7 @@
             <div class="team-detail-stats">
                 <div class="stat-box"><span class="stat-label">Rank</span><span class="stat-value" id="cd-rank"></span></div>
                 <div class="stat-box"><span class="stat-label">Points</span><span class="stat-value" id="cd-pts"></span><span class="stat-asof" id="cd-pts-asof"></span></div>
+                <div class="stat-box"><span class="stat-label">Level</span><span class="stat-value" id="cd-level"></span></div>
                 <div class="stat-box"><span class="stat-label">Roster</span><span class="stat-value" id="cd-roster"></span></div>
             </div>
             <div class="team-detail-stats" style="margin-top:16px">
