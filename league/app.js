@@ -17,6 +17,8 @@ const PALETTE = [
 
 let historyData = [];
 let resolvedNamesCache = {};
+let liveLeagues = null;
+let liveLeaguesTs = 0;
 
 let state = {
     mode: 'top',
@@ -72,7 +74,7 @@ function topLeagues() {
 }
 
 function displayedLeagues() {
-    return state.mode === 'search' ? state.searchResults : topLeagues();
+    return state.mode === 'search' ? state.searchResults : topLeaguesWithLive();
 }
 
 let toastTimer = null;
@@ -134,10 +136,14 @@ async function resolveRosterNames(roster, leagueName) {
 
 function renderLeaderboard() {
     const badge = document.getElementById('event-status-badge');
-    const snap = latestSnapshot();
-    badge.innerHTML = snap
-        ? `<span class="status-pill status-active">⚡ Updated ${new Date(snap.ts).toLocaleTimeString()}</span>`
-        : '';
+    if (liveLeagues && liveLeaguesTs) {
+        badge.innerHTML = `<span class="status-pill status-active">🔴 Live ${new Date(liveLeaguesTs).toLocaleTimeString()}</span>`;
+    } else {
+        const snap = latestSnapshot();
+        badge.innerHTML = snap
+            ? `<span class="status-pill status-active">⚡ Updated ${new Date(snap.ts).toLocaleTimeString()}</span>`
+            : '';
+    }
 
     const list = displayedLeagues();
     document.getElementById('leaderboard-heading').textContent =
@@ -362,25 +368,66 @@ function playerDelta(detail, userId, currentPoints, windowMs, toleranceMs) {
     };
 }
 
+function topLeaguesWithLive() {
+    if (!liveLeagues || !liveLeagues.length) return topLeagues();
+    const snapped = topLeagues();
+    if (!snapped.length) return liveLeagues;
+    const byName = {};
+    for (const l of snapped) byName[l.Name.toLowerCase()] = l;
+    const merged = liveLeagues.map(live => {
+        const snap = byName[live.Name.toLowerCase()];
+        if (snap) return { ...snap, Points: live.Points, Level: live.Level, Members: live.Members };
+        return live;
+    });
+    return merged;
+}
+
+async function fetchLiveLeaderboard() {
+    const pages = 2;
+    const results = [];
+    for (let p = 1; p <= pages; p++) {
+        try {
+            const data = await apiFetch(`${API_BASE}?page=${p}&pageSize=100&sort=Points&sortOrder=desc`);
+            const list = data?.leagues ?? (Array.isArray(data) ? data : []);
+            if (list.length) results.push(...list);
+        } catch (_) { break; }
+    }
+    if (!results.length) return null;
+    return results.map(r => ({
+        Name: r.Name || 'Unknown',
+        Level: Number(r.Level) || 0,
+        Points: Number(r.Points) || 0,
+        Members: Number(r.Members) || 0,
+    }));
+}
+
 async function refreshAll({ silent = false } = {}) {
     const btn = document.getElementById('refresh-btn');
     if (btn) { btn.disabled = true; btn.textContent = '⏳ Loading…'; }
 
     try {
-        await loadHistory();
+        const [, live] = await Promise.all([
+            loadHistory(),
+            fetchLiveLeaderboard().catch(() => null),
+        ]);
+        if (live && live.length) {
+            liveLeagues = live;
+            liveLeaguesTs = Date.now();
+        }
         if (state.mode === 'top') renderLeaderboard();
         if (ui.currentClanName) {
-            const stillTracked = topLeagues().find(c => c.Name.toLowerCase() === ui.currentClanName.toLowerCase());
+            const stillTracked = topLeaguesWithLive().find(c => c.Name.toLowerCase() === ui.currentClanName.toLowerCase());
             if (stillTracked) {
                 ui.currentClanDetail = stillTracked;
-                const idx = topLeagues().indexOf(stillTracked);
+                const idx = topLeaguesWithLive().indexOf(stillTracked);
                 if (idx !== -1) {
                     ui.currentRank = idx + 1;
                     renderLeagueDetail();
                 }
             }
         }
-        if (!silent) toast(`Loaded ${fmt(topLeagues().length)} leagues`, 'success');
+        const liveTag = liveLeagues ? ' (live)' : '';
+        if (!silent) toast(`Loaded ${fmt(topLeaguesWithLive().length)} leagues${liveTag}`, 'success');
     } catch (err) {
         if (!silent) toast(err.message || 'Failed to refresh', 'error');
     } finally {
