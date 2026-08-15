@@ -103,7 +103,7 @@ function buildLeagueFromDetail(detail, summary) {
     // Start with contributors (already sorted by Points desc)
     for (const c of contributions) {
         const uid  = asNumber(c.UserID);
-        if (uid <= 0) continue;
+        if (uid <= 0 || seen.has(uid)) continue;
         seen.add(uid);
         roster.push({
             UserID:      uid,

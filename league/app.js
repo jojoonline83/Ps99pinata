@@ -513,7 +513,7 @@ async function buildLiveDetail(raw) {
     const seen = new Set();
     for (const c of contribs) {
         const uid = Number(c.UserID);
-        if (uid <= 0) continue;
+        if (uid <= 0 || seen.has(uid)) continue;
         seen.add(uid);
         let displayName = c.DisplayName || String(uid);
         if (displayName === String(uid)) {
@@ -526,6 +526,7 @@ async function buildLiveDetail(raw) {
     for (const m of members) {
         const uid = Number(m.UserID);
         if (uid <= 0 || seen.has(uid)) continue;
+        seen.add(uid);
         let displayName = m.DisplayName || String(uid);
         if (displayName === String(uid)) {
             const cached = cache[uid] || cache[String(uid)];
