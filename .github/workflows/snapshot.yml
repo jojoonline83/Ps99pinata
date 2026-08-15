@@ -1,4 +1,4 @@
-name: Snapshot Clan Battle Data
+name: Snapshot Data
 
 on:
   workflow_dispatch:
@@ -22,9 +22,10 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           for i in 1 2 3 4 5; do
             node .github/scripts/snapshot.mjs
-            git add history.json resolved_names.json alert_state.json
+            node .github/scripts/league_snapshot.mjs
+            git add history.json resolved_names.json alert_state.json league/history.json league/resolved_names.json
             git diff --cached --quiet && exit 0
-            git commit -m "chore: snapshot clan battle data"
+            git commit -m "chore: snapshot data"
             git push && exit 0
             echo "Push rejected — retrying from latest gh-pages"
             git reset --hard HEAD~1
