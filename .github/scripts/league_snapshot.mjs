@@ -55,9 +55,13 @@ const pageResults = await Promise.all(
 );
 
 const summaries = [];
-for (const json of pageResults) {
-    const leagues = json?.leagues;
-    if (!Array.isArray(leagues) || !leagues.length) continue;
+for (const [idx, json] of pageResults.entries()) {
+    if (!json) { console.log(`  page ${idx + 1}: no response`); continue; }
+    const leagues = json.leagues ?? json.data;
+    if (!Array.isArray(leagues) || !leagues.length) {
+        console.log(`  page ${idx + 1}: no leagues array (keys: ${Object.keys(json).join(', ')})`);
+        continue;
+    }
     for (const raw of leagues) {
         summaries.push({
             Name:             raw.Name || 'Unknown',
