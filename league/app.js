@@ -249,14 +249,17 @@ function renderLeagueDetail() {
 }
 
 async function apiFetch(url) {
+    function unwrap(json) {
+        return (json && json.status === 'ok' && json.data !== undefined) ? json.data : json;
+    }
     try {
         const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
-        if (res.ok) return await res.json();
+        if (res.ok) return unwrap(await res.json());
     } catch (_) {}
     for (const proxy of CORS_PROXIES) {
         try {
             const res = await fetch(proxy + encodeURIComponent(url), { signal: AbortSignal.timeout(20000) });
-            if (res.ok) return await res.json();
+            if (res.ok) return unwrap(await res.json());
         } catch (_) {}
     }
     throw new Error('API unavailable');
