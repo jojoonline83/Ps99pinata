@@ -231,16 +231,11 @@ function renderLeagueDetail() {
 
     const tbody = document.getElementById('roster-tbody');
     const roster = detail.roster || [];
-    const snapLeague = latestSnapshot() ? findLeagueInSnapshot(latestSnapshot(), detail.Name) : null;
-    const snapRoster = snapLeague?.roster || [];
-    const snapPointsById = {};
-    snapRoster.forEach(sp => { snapPointsById[sp.UserID] = sp.Points; });
     tbody.innerHTML = roster.length
         ? roster.map((p, idx) => {
-            const pts = snapPointsById[p.UserID] !== undefined ? snapPointsById[p.UserID] : p.Points;
-            const d10 = playerDelta(detail, p.UserID, pts, 10 * 60_000, 11 * 60_000);
-            const d30 = playerDelta(detail, p.UserID, pts, 30 * 60_000, 8  * 60_000);
-            const d1h = playerDelta(detail, p.UserID, pts, 60 * 60_000, 12 * 60_000);
+            const d10 = playerDelta(detail, p.UserID, p.Points, 10 * 60_000, 11 * 60_000);
+            const d30 = playerDelta(detail, p.UserID, p.Points, 30 * 60_000, 8  * 60_000);
+            const d1h = playerDelta(detail, p.UserID, p.Points, 60 * 60_000, 12 * 60_000);
             return `
               <tr>
                 <td class="player-rank">${idx + 1}</td>
@@ -299,15 +294,14 @@ function hasRosterData(entry) {
 }
 
 function findSnapshotNear(msAgo, toleranceMs) {
-    if (historyData.length < 2) return null;
-    const latest = historyData[historyData.length - 1];
-    const targetTs = latest.ts - msAgo;
+    if (!historyData.length) return null;
+    const now = Date.now();
+    const targetTs = now - msAgo;
     const minAgeMs = msAgo / 2;
     let best = null, bestDiff = Infinity;
     for (const entry of historyData) {
-        if (entry === latest) continue;
         if (!hasRosterData(entry)) continue;
-        if (latest.ts - entry.ts < minAgeMs) continue;
+        if (now - entry.ts < minAgeMs) continue;
         const diff = Math.abs(entry.ts - targetTs);
         if (diff < bestDiff) { bestDiff = diff; best = entry; }
     }
@@ -339,14 +333,12 @@ function renderDeltaStat(elId, detail, windowMs, toleranceMs) {
         return null;
     }
 
-    const latest = latestSnapshot();
-    const latestLeague = latest ? findLeagueInSnapshot(latest, detail.Name) : null;
-    const currentPoints = latestLeague ? latestLeague.Points : detail.Points;
-    const ageMin = Math.round((latest.ts - snap.ts) / 60000);
+    const currentPoints = detail.Points;
+    const ageMin = Math.round((Date.now() - snap.ts) / 60000);
     const delta  = currentPoints - entry.Points;
     const sign   = delta >= 0 ? '+' : '−';
     el.textContent = `${sign}${fmt(Math.abs(delta))}`;
-    el.title       = `From snapshot ${ageMin}m ago`;
+    el.title       = `vs snapshot ${ageMin}m ago`;
     el.style.color = delta > 0 ? 'var(--success)' : (delta < 0 ? 'var(--danger)' : '');
     if (asOfEl) asOfEl.textContent = `${ageMin}m ago`;
     return snap;
