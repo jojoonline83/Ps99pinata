@@ -256,7 +256,7 @@ console.log(`Snapshot recorded: ${leagues.length} leagues with roster detail in 
 
 /* ── DC alerts (Discord) ────────────────────────────────────────── */
 
-const DISCORD_WEBHOOK = 'https://discord.com/api/webhooks/1499732518692196485/U2pJIrJIPPjIVLTn2VlGtvuGlAaChRLiYqEFXe3AZj0l-YHRTebD16x4mn-WxDn9MXc1';
+const DISCORD_WEBHOOK = process.env.DISCORD_WEBHOOK || '';
 const DISCORD_ROLE_ID = '967089828837597264';
 const WATCH_PLAYERS = ['jojo8', 'javierplayz'];
 const DC_WINDOWS = [
@@ -292,6 +292,7 @@ function fmtNum(n) {
 }
 
 async function sendDiscordEmbed(embed) {
+    if (!DISCORD_WEBHOOK) { console.log('DISCORD_WEBHOOK not set — skipping alert.'); return; }
     try {
         const res = await fetch(DISCORD_WEBHOOK, {
             method: 'POST',

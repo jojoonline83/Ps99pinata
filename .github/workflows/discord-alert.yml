@@ -13,8 +13,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Send Discord webhook
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         run: |
+          if [ -z "$DISCORD_WEBHOOK" ]; then
+            echo "DISCORD_WEBHOOK secret not set"
+            exit 1
+          fi
           curl -s -X POST \
             -H "Content-Type: application/json" \
-            "https://discord.com/api/webhooks/1499732518692196485/U2pJIrJIPPjIVLTn2VlGtvuGlAaChRLiYqEFXe3AZj0l-YHRTebD16x4mn-WxDn9MXc1" \
+            "$DISCORD_WEBHOOK" \
             -d "{\"content\":\"${{ github.event.inputs.message }}\",\"allowed_mentions\":{\"roles\":[\"967089828837597264\"]}}"
