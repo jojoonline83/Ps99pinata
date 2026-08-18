@@ -237,10 +237,11 @@ function renderLeagueDetail() {
     snapRoster.forEach(sp => { snapPointsById[sp.UserID] = sp.Points; });
     tbody.innerHTML = roster.length
         ? roster.map((p, idx) => {
-            const pts = snapPointsById[p.UserID] !== undefined ? snapPointsById[p.UserID] : p.Points;
-            const d10 = playerDelta(detail, p.UserID, pts, 10 * 60_000, 11 * 60_000);
-            const d30 = playerDelta(detail, p.UserID, pts, 30 * 60_000, 8  * 60_000);
-            const d1h = playerDelta(detail, p.UserID, pts, 60 * 60_000, 12 * 60_000);
+            const hasSnap = snapPointsById[p.UserID] !== undefined;
+            const pts = hasSnap ? snapPointsById[p.UserID] : null;
+            const d10 = pts !== null ? playerDelta(detail, p.UserID, pts, 10 * 60_000, 11 * 60_000) : { text: '—', color: '' };
+            const d30 = pts !== null ? playerDelta(detail, p.UserID, pts, 30 * 60_000, 8  * 60_000) : { text: '—', color: '' };
+            const d1h = pts !== null ? playerDelta(detail, p.UserID, pts, 60 * 60_000, 12 * 60_000) : { text: '—', color: '' };
             return `
               <tr>
                 <td class="player-rank">${idx + 1}</td>
@@ -341,7 +342,12 @@ function renderDeltaStat(elId, detail, windowMs, toleranceMs) {
 
     const latest = latestSnapshot();
     const latestLeague = latest ? findLeagueInSnapshot(latest, detail.Name) : null;
-    const currentPoints = latestLeague ? latestLeague.Points : detail.Points;
+    if (!latestLeague) {
+        el.textContent = '—'; el.title = 'League not in latest snapshot';
+        if (asOfEl) asOfEl.textContent = '';
+        return null;
+    }
+    const currentPoints = latestLeague.Points;
     const ageMin = Math.round((latest.ts - snap.ts) / 60000);
     const delta  = currentPoints - entry.Points;
     const sign   = delta >= 0 ? '+' : '−';
