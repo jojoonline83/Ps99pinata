@@ -134,6 +134,23 @@ async function resolveRosterNames(roster, leagueName) {
     if (changed && ui.currentClanName === leagueName) renderLeagueDetail();
 }
 
+function leagueDelta(leagueName, windowMs, toleranceMs) {
+    const latest = latestSnapshot();
+    if (!latest) return { text: '—', color: '' };
+    const latestLeague = findLeagueInSnapshot(latest, leagueName);
+    if (!latestLeague) return { text: '—', color: '' };
+    const snap = findSnapshotNear(windowMs, toleranceMs);
+    if (!snap) return { text: '—', color: '' };
+    const past = findLeagueInSnapshot(snap, leagueName);
+    if (!past) return { text: '—', color: '' };
+    const delta = latestLeague.Points - past.Points;
+    const sign = delta >= 0 ? '+' : '−';
+    return {
+        text: `${sign}${fmt(Math.abs(delta))}`,
+        color: delta > 0 ? 'var(--success)' : (delta < 0 ? 'var(--danger)' : ''),
+    };
+}
+
 function renderLeaderboard() {
     const badge = document.getElementById('event-status-badge');
     if (liveLeagues && liveLeaguesTs) {
@@ -155,7 +172,7 @@ function renderLeaderboard() {
 
     const tbody = document.getElementById('leaderboard-tbody');
     if (!list.length) {
-        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:40px;color:var(--text-muted)">
+        tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-muted)">
           ${state.mode === 'search' ? 'No leagues matched your search.' : 'No data yet — hit <strong>🔄 Refresh</strong> to load.'}
         </td></tr>`;
         return;
@@ -165,6 +182,9 @@ function renderLeaderboard() {
         const color = colorFor(c.Name);
         const members = c.roster ? c.roster.length : (c.Members || 0);
         const level = c.Level || 0;
+        const d10 = leagueDelta(c.Name, 10 * 60_000, 11 * 60_000);
+        const d30 = leagueDelta(c.Name, 30 * 60_000, 8  * 60_000);
+        const d1h = leagueDelta(c.Name, 60 * 60_000, 12 * 60_000);
         return `
       <tr onclick="showLeagueDetail('${esc(c.Name).replace(/'/g, "\\'")}')" style="cursor:pointer">
         <td class="player-rank">${idx + 1}</td>
@@ -172,6 +192,9 @@ function renderLeaderboard() {
         <td>${level}</td>
         <td>${members}</td>
         <td class="player-points" style="color:${color}">${fmt(c.Points)}</td>
+        <td style="color:${d10.color}">${d10.text}</td>
+        <td style="color:${d30.color}">${d30.text}</td>
+        <td style="color:${d1h.color}">${d1h.text}</td>
       </tr>`;
     }).join('');
 }
