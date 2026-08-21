@@ -25,9 +25,9 @@ jobs:
           mkdir -p league
           for i in 1 2 3 4 5; do
             node .github/scripts/snapshot.mjs
-            node .github/scripts/league_snapshot.mjs
+            # node .github/scripts/league_snapshot.mjs  # league event over — skipped to save resources
             git add -f history.json resolved_names.json alert_state.json
-            git add -f league/history.json league/resolved_names.json league/alert_state.json 2>/dev/null || true
+            # git add -f league/history.json league/resolved_names.json league/alert_state.json 2>/dev/null || true
             git diff --cached --quiet && exit 0
             git commit -m "chore: snapshot data"
             git push && exit 0
